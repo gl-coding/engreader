@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EngReader EPUB</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; font-family: Georgia, serif; }
+  #viewer {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  #viewer iframe {
+    border: none;
+  }
+</style>
+</head>
+<body>
+<div id="viewer"></div>
+<script>
+var book = null;
+var rendition = null;
+var currentCfi = null;
+var locationsReady = false;
+var totalBookPages = 0;
+
+function loadBook(url) {
+  if (book) {
+    book.destroy();
+  }
+  try {
+    book = ePub(url, { openAs: "epub" });
+  } catch(e) {
+    document.getElementById("viewer").innerHTML = "<p style='padding:20px;color:red;'>加载失败: " + e.message + "</p>";
+    return;
+  }
+  rendition = book.renderTo("viewer", {
+    width: "100%",
+    height: "100%",
+    flow: "paginated",
+    manager: "default",
+    spread: "none"
+  });
+
+  rendition.display().catch(function(err) {
+    document.getElementById("viewer").innerHTML = "<p style='padding:20px;color:red;'>渲染失败: " + err.message + "</p>";
+  });
+
+  // Enable keyboard and scroll-based pagination.
+  rendition.on("keyup", function(e) {
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") { rendition.next(); }
+    if (e.key === "ArrowLeft" || e.key === "ArrowUp") { rendition.prev(); }
+  });
+
+  document.addEventListener("keyup", function(e) {
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") { rendition.next(); }
+    if (e.key === "ArrowLeft" || e.key === "ArrowUp") { rendition.prev(); }
+  });
+
+  // Wheel scroll to paginate.
+  document.getElementById("viewer").addEventListener("wheel", function(e) {
+    if (e.deltaY > 0) { rendition.next(); }
+    else if (e.deltaY < 0) { rendition.prev(); }
+    e.preventDefault();
+  }, { passive: false });
+
+  rendition.on("relocated", function(location) {
+    currentCfi = location.start.cfi;
+    if (window.flutter_inappwebview) {
+      var payload = { cfi: location.start.cfi };
+      if (locationsReady) {
+        var percentage = book.locations.percentageFromCfi(location.start.cfi);
+        var currentPage = Math.ceil(percentage * totalBookPages);
+        if (currentPage < 1 && totalBookPages > 0) currentPage = 1;
+        payload.page = currentPage;
+        payload.total = totalBookPages;
+        payload.progress = percentage;
+      } else {
+        var displayed = location.start.displayed;
+        var page = displayed ? displayed.page : 0;
+        var total = displayed ? displayed.total : 0;
+        payload.page = page;
+        payload.total = total;
+        payload.progress = total > 0 ? page / total : 0;
+        payload.chapterOnly = true;
+      }
+      window.flutter_inappwebview.callHandler("onRelocated", payload);
+    }
+  });
+
+  rendition.on("rendered", function(section) {
+    setupSelectionListener(section);
+  });
+
+  book.ready.then(function() {
+    return book.navigation.toc;
+  }).then(function(toc) {
+    if (window.flutter_inappwebview) {
+      var chapters = toc.map(function(ch) {
+        return { label: ch.label.trim(), href: ch.href };
+      });
+      window.flutter_inappwebview.callHandler("onTocLoaded", chapters);
+    }
+  });
+
+  // Load cached locations or generate them.
+  book.ready.then(function() {
+    if (window.flutter_inappwebview) {
+      window.flutter_inappwebview.callHandler("requestLocationsCache").then(function(cached) {
+        if (cached && cached.length > 0) {
+          book.locations.load(cached);
+          locationsReady = true;
+          totalBookPages = book.locations.length();
+          window.flutter_inappwebview.callHandler("onLocationsReady", {
+            total: totalBookPages
+          });
+          if (currentCfi && rendition) {
+            rendition.display(currentCfi);
+          }
+        } else {
+          generateLocations();
+        }
+      });
+    } else {
+      generateLocations();
+    }
+  });
+}
+
+function generateLocations() {
+  book.locations.generate(1024).then(function(locations) {
+    locationsReady = true;
+    totalBookPages = locations.length;
+    var saved = book.locations.save();
+    if (window.flutter_inappwebview) {
+      window.flutter_inappwebview.callHandler("onLocationsReady", {
+        total: totalBookPages,
+        locationsData: saved
+      });
+    }
+    if (currentCfi && rendition) {
+      rendition.display(currentCfi);
+    }
+  });
+}
+
+function setupSelectionListener(section) {
+  var doc = section.document || (rendition && rendition.getContents &&
+    rendition.getContents()[0] && rendition.getContents()[0].document);
+  if (!doc) return;
+
+  doc.addEventListener("mouseup", function(e) {
+    var selection = doc.getSelection();
+    var text = selection ? selection.toString().trim() : "";
+    if (text.length > 0 && window.flutter_inappwebview) {
+      var range = selection.getRangeAt(0);
+      var rect = range.getBoundingClientRect();
+      // Get iframe position within the main page
+      var iframe = document.querySelector("#viewer iframe");
+      var iframeRect = iframe ? iframe.getBoundingClientRect() : {left: 0, top: 0};
+      window.flutter_inappwebview.callHandler("onTextSelected", {
+        text: text,
+        x: iframeRect.left + rect.left + rect.width / 2,
+        y: iframeRect.top + rect.top
+      });
+    }
+  });
+}
+
+function goToChapter(href) {
+  if (rendition) {
+    rendition.display(href);
+  }
+}
+
+function goToCfi(cfi) {
+  if (rendition) {
+    rendition.display(cfi);
+  }
+}
+
+function nextPage() {
+  if (rendition) rendition.next();
+}
+
+function prevPage() {
+  if (rendition) rendition.prev();
+}
+</script>
+</body>
+</html>

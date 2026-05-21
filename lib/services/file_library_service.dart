@@ -57,7 +57,7 @@ class FileLibraryService {
         .map((f) => f.path)
         .where((path) {
           final ext = p.extension(path).toLowerCase();
-          return ext == '.pdf' || ext == '.txt';
+          return ext == '.pdf' || ext == '.txt' || ext == '.epub';
         })
         .toList();
   }

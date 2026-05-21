@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:engreader/services/settings_service.dart';
 
 class PdfReaderView extends StatefulWidget {
   final String filePath;
@@ -32,6 +33,21 @@ class _PdfReaderViewState extends State<PdfReaderView> {
   void initState() {
     super.initState();
     _channel.setMethodCallHandler(_handleNativeCall);
+    _restoreProgress();
+  }
+
+  Future<void> _restoreProgress() async {
+    final progress =
+        await SettingsService.getReadingProgress(widget.filePath);
+    if (progress != null && progress['page'] != null) {
+      final savedPage = progress['page'] as int;
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (!mounted) return;
+        _channel.invokeMethod('goToPage', {'page': savedPage});
+        setState(() => _currentPage = savedPage);
+        widget.onPageChanged(savedPage);
+      });
+    }
   }
 
   Future<dynamic> _handleNativeCall(MethodCall call) async {
@@ -46,6 +62,7 @@ class _PdfReaderViewState extends State<PdfReaderView> {
         final page = call.arguments as int;
         setState(() => _currentPage = page);
         widget.onPageChanged(page);
+        SettingsService.saveReadingProgress(widget.filePath, {'page': page});
         break;
       case 'onDocumentLoaded':
         final args = call.arguments as Map;

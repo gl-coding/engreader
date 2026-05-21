@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:engreader/services/settings_service.dart';
 
 class TxtReaderView extends StatefulWidget {
   final String filePath;
@@ -28,6 +29,28 @@ class _TxtReaderViewState extends State<TxtReaderView> {
   void initState() {
     super.initState();
     _channel.setMethodCallHandler(_handleNativeCall);
+    _restoreProgress();
+    _scrollController.addListener(_onScroll);
+  }
+
+  Future<void> _restoreProgress() async {
+    final progress =
+        await SettingsService.getReadingProgress(widget.filePath);
+    if (progress != null && progress['scrollOffset'] != null) {
+      final offset = (progress['scrollOffset'] as num).toDouble();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(
+              offset.clamp(0.0, _scrollController.position.maxScrollExtent));
+        }
+      });
+    }
+  }
+
+  void _onScroll() {
+    SettingsService.saveReadingProgress(widget.filePath, {
+      'scrollOffset': _scrollController.offset,
+    });
   }
 
   Future<dynamic> _handleNativeCall(MethodCall call) async {
@@ -66,6 +89,7 @@ class _TxtReaderViewState extends State<TxtReaderView> {
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     super.dispose();
   }

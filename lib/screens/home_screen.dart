@@ -14,6 +14,28 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   List<String> _recentFiles = [];
 
+  static IconData _fileIcon(String ext) {
+    switch (ext) {
+      case '.pdf':
+        return Icons.picture_as_pdf;
+      case '.epub':
+        return Icons.book;
+      default:
+        return Icons.text_snippet;
+    }
+  }
+
+  static Color _fileColor(String ext) {
+    switch (ext) {
+      case '.pdf':
+        return Colors.red;
+      case '.epub':
+        return Colors.green;
+      default:
+        return Colors.blue;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -146,12 +168,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
                       return ListTile(
                         leading: Icon(
-                          ext == '.pdf'
-                              ? Icons.picture_as_pdf
-                              : Icons.text_snippet,
-                          color: exists
-                              ? (ext == '.pdf' ? Colors.red : Colors.blue)
-                              : Colors.grey,
+                          _fileIcon(ext),
+                          color: exists ? _fileColor(ext) : Colors.grey,
                         ),
                         title: Text(
                           fileName,

@@ -94,7 +94,7 @@ class _SidebarState extends State<Sidebar> {
   Future<void> _importFile() async {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['pdf', 'txt'],
+      allowedExtensions: ['pdf', 'txt', 'epub'],
     );
 
     if (result != null && result.files.single.path != null) {
@@ -111,7 +111,15 @@ class _SidebarState extends State<Sidebar> {
 
   void _onFileTap(String filePath) {
     final ext = p.extension(filePath).toLowerCase();
-    final fileType = ext == '.pdf' ? 'pdf' : 'txt';
+    final String fileType;
+    switch (ext) {
+      case '.pdf':
+        fileType = 'pdf';
+      case '.epub':
+        fileType = 'epub';
+      default:
+        fileType = 'txt';
+    }
     widget.onFileSelected(filePath, fileType);
   }
 
@@ -300,13 +308,9 @@ class _SidebarState extends State<Sidebar> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(
-                                      ext == '.pdf'
-                                          ? Icons.picture_as_pdf
-                                          : Icons.text_snippet,
+                                      _fileIcon(ext),
                                       size: 16,
-                                      color: ext == '.pdf'
-                                          ? Colors.red
-                                          : Colors.blue,
+                                      color: _fileColor(ext),
                                     ),
                                     const SizedBox(width: 8),
                                     Text(fileName,
@@ -319,13 +323,9 @@ class _SidebarState extends State<Sidebar> {
                               dense: true,
                               visualDensity: VisualDensity.compact,
                               leading: Icon(
-                                ext == '.pdf'
-                                    ? Icons.picture_as_pdf
-                                    : Icons.text_snippet,
+                                _fileIcon(ext),
                                 size: 18,
-                                color: exists
-                                    ? (ext == '.pdf' ? Colors.red : Colors.blue)
-                                    : Colors.grey,
+                                color: exists ? _fileColor(ext) : Colors.grey,
                               ),
                               title: Text(
                                 fileName,
@@ -360,6 +360,28 @@ class _SidebarState extends State<Sidebar> {
         return Icons.history;
       default:
         return Icons.folder_outlined;
+    }
+  }
+
+  static IconData _fileIcon(String ext) {
+    switch (ext) {
+      case '.pdf':
+        return Icons.picture_as_pdf;
+      case '.epub':
+        return Icons.book;
+      default:
+        return Icons.text_snippet;
+    }
+  }
+
+  static Color _fileColor(String ext) {
+    switch (ext) {
+      case '.pdf':
+        return Colors.red;
+      case '.epub':
+        return Colors.green;
+      default:
+        return Colors.blue;
     }
   }
 }

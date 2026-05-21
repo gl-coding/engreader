@@ -12,6 +12,7 @@ import 'package:engreader/widgets/resizable_panel.dart';
 import 'package:engreader/widgets/annotation_panel.dart';
 import 'package:engreader/widgets/txt_reader_view.dart';
 import 'package:engreader/widgets/pdf_reader_view.dart';
+import 'package:engreader/widgets/epub_reader_view.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -31,7 +32,28 @@ class _MainLayoutState extends State<MainLayout> {
   bool _showSidebar = true;
   bool _showAnnotationPanel = true;
   int _currentPage = 0;
-  // Pending selection awaiting user confirmation to annotate.
+
+  static IconData _fileIcon(String type) {
+    switch (type) {
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      case 'epub':
+        return Icons.book;
+      default:
+        return Icons.text_snippet;
+    }
+  }
+
+  static Color _fileColor(String type) {
+    switch (type) {
+      case 'pdf':
+        return Colors.red;
+      case 'epub':
+        return Colors.green;
+      default:
+        return Colors.blue;
+    }
+  }
 
   @override
   void initState() {
@@ -216,13 +238,9 @@ class _MainLayoutState extends State<MainLayout> {
                       if (_currentFilePath != null) ...[
                         const SizedBox(width: 8),
                         Icon(
-                          _currentFileType == 'pdf'
-                              ? Icons.picture_as_pdf
-                              : Icons.text_snippet,
+                          _fileIcon(_currentFileType!),
                           size: 16,
-                          color: _currentFileType == 'pdf'
-                              ? Colors.red
-                              : Colors.blue,
+                          color: _fileColor(_currentFileType!),
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -270,20 +288,7 @@ class _MainLayoutState extends State<MainLayout> {
                       : Row(
                           children: [
                             Expanded(
-                              child: _currentFileType == 'pdf'
-                                  ? PdfReaderView(
-                                      filePath: _currentFilePath!,
-                                      onAnnotateConfirmed:
-                                          _runLlmAndAddAnnotation,
-                                      onPageChanged: (page) => setState(
-                                          () => _currentPage = page),
-                                    )
-                                  : TxtReaderView(
-                                      filePath: _currentFilePath!,
-                                      content: _sourceText ?? '',
-                                      onAnnotateConfirmed:
-                                          _runLlmAndAddAnnotation,
-                                    ),
+                              child: _buildReaderView(),
                             ),
                             if (_showAnnotationPanel)
                               ResizablePanel(
@@ -304,6 +309,28 @@ class _MainLayoutState extends State<MainLayout> {
           ),
         ],
     );
+  }
+
+  Widget _buildReaderView() {
+    switch (_currentFileType) {
+      case 'pdf':
+        return PdfReaderView(
+          filePath: _currentFilePath!,
+          onAnnotateConfirmed: _runLlmAndAddAnnotation,
+          onPageChanged: (page) => setState(() => _currentPage = page),
+        );
+      case 'epub':
+        return EpubReaderView(
+          filePath: _currentFilePath!,
+          onAnnotateConfirmed: _runLlmAndAddAnnotation,
+        );
+      default:
+        return TxtReaderView(
+          filePath: _currentFilePath!,
+          content: _sourceText ?? '',
+          onAnnotateConfirmed: _runLlmAndAddAnnotation,
+        );
+    }
   }
 
   Widget _buildWelcome(ColorScheme colorScheme) {
