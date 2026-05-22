@@ -48,10 +48,18 @@ class MainFlutterWindow: NSWindow {
 class MacPDFPlatformViewFactory: NSObject, FlutterPlatformViewFactory {
     private let messenger: FlutterBinaryMessenger
     private var activePlatformViews: [Int64: MacPDFPlatformView] = [:]
+    static var shared: MacPDFPlatformViewFactory?
 
     init(messenger: FlutterBinaryMessenger) {
         self.messenger = messenger
         super.init()
+        MacPDFPlatformViewFactory.shared = self
+    }
+
+    func setHighlightsOnActiveView(pageHighlights: [Int: [[String: Any]]]) {
+        if let view = activePlatformViews.values.first {
+            view.setHighlights(pageHighlights: pageHighlights)
+        }
     }
 
     func create(
@@ -79,6 +87,8 @@ class MacPDFPlatformViewFactory: NSObject, FlutterPlatformViewFactory {
 class AnnotatePopoverViewController: NSViewController {
     var text: String = ""
     var onAnnotate: (() -> Void)?
+    private var typeLabel: NSTextField?
+    private var textLabel: NSTextField?
 
     override func loadView() {
         let isWord = !text.contains(" ") || text.split(separator: " ").count <= 2
@@ -90,28 +100,30 @@ class AnnotatePopoverViewController: NSViewController {
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
 
-        let typeLabel = NSTextField(labelWithString: typeText)
-        typeLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        typeLabel.textColor = isWord
+        let tLabel = NSTextField(labelWithString: typeText)
+        tLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        tLabel.textColor = isWord
             ? NSColor.systemBlue
             : NSColor.systemPurple
-        typeLabel.translatesAutoresizingMaskIntoConstraints = false
+        tLabel.translatesAutoresizingMaskIntoConstraints = false
+        self.typeLabel = tLabel
 
-        let textLabel = NSTextField(labelWithString: preview)
-        textLabel.font = NSFont.systemFont(ofSize: 13)
-        textLabel.lineBreakMode = .byTruncatingTail
-        textLabel.maximumNumberOfLines = 1
-        textLabel.translatesAutoresizingMaskIntoConstraints = false
-        textLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        textLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let txLabel = NSTextField(labelWithString: preview)
+        txLabel.font = NSFont.systemFont(ofSize: 13)
+        txLabel.lineBreakMode = .byTruncatingTail
+        txLabel.maximumNumberOfLines = 1
+        txLabel.translatesAutoresizingMaskIntoConstraints = false
+        txLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        txLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        self.textLabel = txLabel
 
         let button = NSButton(title: "批注", target: self, action: #selector(annotateClicked))
         button.bezelStyle = .rounded
         button.keyEquivalent = "\r"
         button.translatesAutoresizingMaskIntoConstraints = false
 
-        container.addSubview(typeLabel)
-        container.addSubview(textLabel)
+        container.addSubview(tLabel)
+        container.addSubview(txLabel)
         container.addSubview(button)
 
         NSLayoutConstraint.activate([
@@ -119,18 +131,30 @@ class AnnotatePopoverViewController: NSViewController {
             container.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
             container.widthAnchor.constraint(lessThanOrEqualToConstant: 480),
 
-            typeLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            typeLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            tLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            tLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
 
-            textLabel.leadingAnchor.constraint(equalTo: typeLabel.trailingAnchor, constant: 8),
-            textLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            textLabel.trailingAnchor.constraint(lessThanOrEqualTo: button.leadingAnchor, constant: -12),
+            txLabel.leadingAnchor.constraint(equalTo: tLabel.trailingAnchor, constant: 8),
+            txLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            txLabel.trailingAnchor.constraint(lessThanOrEqualTo: button.leadingAnchor, constant: -12),
 
             button.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
             button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
 
         self.view = container
+    }
+
+    func updateText(_ newText: String) {
+        text = newText
+        let isWord = !newText.contains(" ") || newText.split(separator: " ").count <= 2
+        let typeText = isWord ? "单词" : "句子"
+        let preview = newText.count > 50
+            ? String(newText.prefix(50)) + "…"
+            : newText
+        typeLabel?.stringValue = typeText
+        typeLabel?.textColor = isWord ? NSColor.systemBlue : NSColor.systemPurple
+        textLabel?.stringValue = preview
     }
 
     @objc private func annotateClicked() {
@@ -256,17 +280,49 @@ class MacPDFPlatformView: NSObject {
         let pageHeight = page.bounds(for: .mediaBox).height
         let yPosition = Double(pageBounds.midY / pageHeight)
 
+        // Get character range within the page text.
+        var charStart: Int = -1
+        var charEnd: Int = -1
+        if let pageText = page.string as NSString? {
+            let range = pageText.range(of: text, options: [.caseInsensitive])
+            if range.location != NSNotFound {
+                charStart = range.location
+                charEnd = range.location + range.length
+            }
+        }
+
         let viewRect = pdfView.convert(pageBounds, from: page)
 
-        // Show native popover anchored above the selection. Flutter overlays
-        // are obscured by the PlatformView, so we use a native NSPopover.
         showAnnotatePopover(text: text, anchorRect: viewRect, page: pageIndex,
-                            yPosition: yPosition)
+                            yPosition: yPosition, charStart: charStart, charEnd: charEnd)
     }
 
     private func showAnnotatePopover(text: String, anchorRect: NSRect,
-                                      page: Int, yPosition: Double) {
-        engLog("showAnnotatePopover: text=\(text.prefix(20)), anchorRect=\(anchorRect), pdfView.bounds=\(pdfView.bounds), pdfView.window=\(String(describing: pdfView.window))")
+                                      page: Int, yPosition: Double,
+                                      charStart: Int = -1, charEnd: Int = -1) {
+        // If popover is already showing, just update text and callback in-place.
+        if let existingPopover = annotatePopover, existingPopover.isShown,
+           let vc = existingPopover.contentViewController as? AnnotatePopoverViewController {
+            vc.updateText(text)
+            vc.onAnnotate = { [weak self] in
+                guard let self = self else { return }
+                var args: [String: Any] = [
+                    "text": text,
+                    "page": page,
+                    "yPosition": yPosition,
+                ]
+                if charStart >= 0 && charEnd >= 0 {
+                    args["charStart"] = charStart
+                    args["charEnd"] = charEnd
+                }
+                self.channel.invokeMethod("onAnnotateConfirmed", arguments: args)
+                self.annotatePopover?.close()
+                self.annotatePopover = nil
+                self.pdfView.clearSelection()
+                self.lastNotifiedText = ""
+            }
+            return
+        }
 
         annotatePopover?.close()
 
@@ -274,12 +330,16 @@ class MacPDFPlatformView: NSObject {
         vc.text = text
         vc.onAnnotate = { [weak self] in
             guard let self = self else { return }
-            engLog("annotate button clicked, text=\(text.prefix(20))")
-            self.channel.invokeMethod("onAnnotateConfirmed", arguments: [
+            var args: [String: Any] = [
                 "text": text,
                 "page": page,
                 "yPosition": yPosition,
-            ] as [String: Any])
+            ]
+            if charStart >= 0 && charEnd >= 0 {
+                args["charStart"] = charStart
+                args["charEnd"] = charEnd
+            }
+            self.channel.invokeMethod("onAnnotateConfirmed", arguments: args)
             self.annotatePopover?.close()
             self.annotatePopover = nil
             self.pdfView.clearSelection()
@@ -291,22 +351,65 @@ class MacPDFPlatformView: NSObject {
         popover.behavior = .transient
         popover.animates = false
 
-        // Make sure anchor rect is valid; clamp to view bounds.
         var rect = anchorRect.intersection(pdfView.bounds)
         if rect.isEmpty {
-            engLog("anchorRect intersection empty, using fallback center")
             rect = NSRect(x: pdfView.bounds.midX, y: pdfView.bounds.midY,
                           width: 1, height: 1)
         }
 
-        engLog("showing popover at rect=\(rect)")
         popover.show(relativeTo: rect, of: pdfView, preferredEdge: .maxY)
         annotatePopover = popover
-        engLog("popover shown, isShown=\(popover.isShown)")
     }
 
     func view() -> NSView {
         return pdfView
+    }
+
+    func setHighlights(pageHighlights: [Int: [[String: Any]]]) {
+        guard let document = pdfView.document else { return }
+
+        for i in 0..<document.pageCount {
+            guard let page = document.page(at: i) else { continue }
+            for annotation in page.annotations where annotation.type == "Highlight" {
+                page.removeAnnotation(annotation)
+            }
+        }
+
+        if pageHighlights.isEmpty { return }
+
+        for (pageIndex, items) in pageHighlights {
+            guard let page = document.page(at: pageIndex) else { continue }
+            guard let pageText = page.string else { continue }
+            let nsPageText = pageText as NSString
+
+            for item in items {
+                let text = item["text"] as? String ?? ""
+                let charStart = item["charStart"] as? Int ?? -1
+                let charEnd = item["charEnd"] as? Int ?? -1
+
+                if charStart >= 0 && charEnd > charStart && charEnd <= nsPageText.length {
+                    // Use precise character range.
+                    let range = NSRange(location: charStart, length: charEnd - charStart)
+                    if let selection = page.selection(for: range) {
+                        let bounds = selection.bounds(for: page)
+                        let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
+                        annotation.color = NSColor.yellow.withAlphaComponent(0.35)
+                        page.addAnnotation(annotation)
+                    }
+                } else if !text.isEmpty {
+                    // Fallback: search by text on this page.
+                    let range = nsPageText.range(of: text, options: [.caseInsensitive])
+                    if range.location != NSNotFound {
+                        if let selection = page.selection(for: range) {
+                            let bounds = selection.bounds(for: page)
+                            let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
+                            annotation.color = NSColor.yellow.withAlphaComponent(0.35)
+                            page.addAnnotation(annotation)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func loadDocument(at path: String) {
@@ -399,6 +502,18 @@ class MacPDFMethodHandler {
             handleGetPageText(call, result: result)
         case "showAnnotatePopover":
             handleShowAnnotatePopover(call, result: result)
+        case "setHighlights":
+            if let args = call.arguments as? [String: Any],
+               let pageHighlights = args["pageHighlights"] as? [String: [[String: Any]]] {
+                var mapped: [Int: [[String: Any]]] = [:]
+                for (key, value) in pageHighlights {
+                    if let pageIndex = Int(key) {
+                        mapped[pageIndex] = value
+                    }
+                }
+                MacPDFPlatformViewFactory.shared?.setHighlightsOnActiveView(pageHighlights: mapped)
+            }
+            result(nil)
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -414,13 +529,30 @@ class MacPDFMethodHandler {
             return
         }
 
-        txtAnnotatePopover?.close()
-
         guard let window = NSApp.mainWindow,
               let contentView = window.contentView else {
             result(nil)
             return
         }
+
+        // If popover is already showing, just update text and callback in-place.
+        if let existingPopover = txtAnnotatePopover, existingPopover.isShown,
+           let vc = existingPopover.contentViewController as? AnnotatePopoverViewController {
+            vc.updateText(text)
+            vc.onAnnotate = { [weak self] in
+                guard let self = self else { return }
+                self.channel.invokeMethod("onAnnotateConfirmed", arguments: [
+                    "text": text,
+                    "yPosition": yPosition,
+                ] as [String: Any])
+                self.txtAnnotatePopover?.close()
+                self.txtAnnotatePopover = nil
+            }
+            result(nil)
+            return
+        }
+
+        txtAnnotatePopover?.close()
 
         let vc = AnnotatePopoverViewController()
         vc.text = text
@@ -439,8 +571,6 @@ class MacPDFMethodHandler {
         popover.behavior = .transient
         popover.animates = false
 
-        // Convert Flutter screen coordinates to NSWindow coordinates.
-        // Flutter origin = top-left; AppKit origin = bottom-left.
         let windowHeight = contentView.bounds.height
         let localX = screenX
         let localY = windowHeight - screenY

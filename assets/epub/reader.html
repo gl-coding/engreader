@@ -28,6 +28,8 @@ var currentCfi = null;
 var locationsReady = false;
 var totalBookPages = 0;
 
+function dbg(msg) {}
+
 function loadBook(url) {
   if (book) {
     book.destroy();
@@ -46,6 +48,18 @@ function loadBook(url) {
     spread: "none"
   });
 
+  // Inject highlight styles into EPUB iframe content.
+  rendition.themes.default({
+    ".epubjs-hl": {
+      "background-color": "rgba(255, 200, 0, 0.5) !important",
+      "mix-blend-mode": "multiply"
+    },
+    ".engreader-hl": {
+      "background-color": "rgba(255, 200, 0, 0.5) !important",
+      "border-radius": "2px"
+    }
+  });
+
   rendition.display().catch(function(err) {
     document.getElementById("viewer").innerHTML = "<p style='padding:20px;color:red;'>渲染失败: " + err.message + "</p>";
   });
@@ -61,10 +75,14 @@ function loadBook(url) {
     if (e.key === "ArrowLeft" || e.key === "ArrowUp") { rendition.prev(); }
   });
 
-  // Wheel scroll to paginate.
+  // Wheel scroll to paginate (throttled to prevent rapid flipping).
+  var wheelThrottled = false;
   document.getElementById("viewer").addEventListener("wheel", function(e) {
+    if (wheelThrottled) { e.preventDefault(); return; }
     if (e.deltaY > 0) { rendition.next(); }
     else if (e.deltaY < 0) { rendition.prev(); }
+    wheelThrottled = true;
+    setTimeout(function() { wheelThrottled = false; }, 400);
     e.preventDefault();
   }, { passive: false });
 
@@ -90,11 +108,78 @@ function loadBook(url) {
       }
       window.flutter_inappwebview.callHandler("onRelocated", payload);
     }
+    // Re-apply highlights after page change.
+    setTimeout(function() { doHighlight(); }, 100);
   });
 
-  rendition.on("rendered", function(section) {
-    setupSelectionListener(section);
+  dbg("rendition created, registering events...");
+
+  // Use Epub.js built-in selection event.
+  rendition.on("selected", function(cfiRange, contents) {
+    dbg("SELECTED event: " + cfiRange);
+    var range = contents.range(cfiRange);
+    var text = range ? range.toString().trim() : "";
+    if (text.length > 0 && window.flutter_inappwebview) {
+      var rect = range.getBoundingClientRect();
+      var iframe = document.querySelector("#viewer iframe");
+      var iframeRect = iframe ? iframe.getBoundingClientRect() : {left: 0, top: 0};
+      window.flutter_inappwebview.callHandler("onTextSelected", {
+        text: text,
+        cfiRange: cfiRange,
+        x: iframeRect.left + rect.left + rect.width / 2,
+        y: iframeRect.top + rect.top
+      });
+      dbg("sent to Flutter OK");
+    }
   });
+
+  // Throttled polling: check selection every 200ms, skip if unchanged.
+  var lastSentText = "";
+  var selThrottled = false;
+  setInterval(function() {
+    if (!rendition || !window.flutter_inappwebview) return;
+    if (selThrottled) return;
+    var contents = rendition.getContents();
+    if (!contents || contents.length === 0) return;
+    var contentsObj = contents[0];
+    var doc = contentsObj.document;
+    if (!doc) return;
+    var sel = doc.getSelection();
+    var text = sel ? sel.toString().trim() : "";
+    if (text.length === 0) {
+      lastSentText = "";
+      return;
+    }
+    if (text === lastSentText) return;
+    lastSentText = text;
+    selThrottled = true;
+    var rect = null;
+    var cfi = "";
+    try {
+      var range = sel.getRangeAt(0);
+      rect = range.getBoundingClientRect();
+      if (contentsObj.cfiFromRange) {
+        cfi = contentsObj.cfiFromRange(range);
+      }
+    } catch(e) {}
+    var iframe = document.querySelector("#viewer iframe");
+    var iframeRect = iframe ? iframe.getBoundingClientRect() : {left: 0, top: 0};
+    var x = 200, y = 200;
+    if (rect) {
+      x = iframeRect.left + rect.left + rect.width / 2;
+      y = iframeRect.top + rect.top;
+    }
+    window.flutter_inappwebview.callHandler("onTextSelected", {
+      text: text,
+      cfiRange: cfi || "",
+      x: x,
+      y: y
+    }).then(function() {
+      selThrottled = false;
+    }).catch(function() {
+      selThrottled = false;
+    });
+  }, 10);
 
   book.ready.then(function() {
     return book.navigation.toc;
@@ -148,29 +233,6 @@ function generateLocations() {
   });
 }
 
-function setupSelectionListener(section) {
-  var doc = section.document || (rendition && rendition.getContents &&
-    rendition.getContents()[0] && rendition.getContents()[0].document);
-  if (!doc) return;
-
-  doc.addEventListener("mouseup", function(e) {
-    var selection = doc.getSelection();
-    var text = selection ? selection.toString().trim() : "";
-    if (text.length > 0 && window.flutter_inappwebview) {
-      var range = selection.getRangeAt(0);
-      var rect = range.getBoundingClientRect();
-      // Get iframe position within the main page
-      var iframe = document.querySelector("#viewer iframe");
-      var iframeRect = iframe ? iframe.getBoundingClientRect() : {left: 0, top: 0};
-      window.flutter_inappwebview.callHandler("onTextSelected", {
-        text: text,
-        x: iframeRect.left + rect.left + rect.width / 2,
-        y: iframeRect.top + rect.top
-      });
-    }
-  });
-}
-
 function goToChapter(href) {
   if (rendition) {
     rendition.display(href);
@@ -180,6 +242,100 @@ function goToChapter(href) {
 function goToCfi(cfi) {
   if (rendition) {
     rendition.display(cfi);
+  }
+}
+
+var highlightTexts = [];
+var highlightCfis = [];
+
+function applyHighlights(items) {
+  highlightTexts = [];
+  highlightCfis = [];
+  if (!items) return;
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    if (typeof item === "string") {
+      highlightTexts.push(item);
+      highlightCfis.push("");
+    } else if (item && item.cfiRange) {
+      highlightTexts.push(item.text || "");
+      highlightCfis.push(item.cfiRange);
+    } else if (item && item.text) {
+      highlightTexts.push(item.text);
+      highlightCfis.push("");
+    }
+  }
+  doHighlight();
+}
+
+var activeCfiAnnotations = [];
+function applyCfiHighlights() {
+  if (!rendition) return;
+  // Remove previous CFI annotations.
+  for (var i = 0; i < activeCfiAnnotations.length; i++) {
+    try { rendition.annotations.remove(activeCfiAnnotations[i], "highlight"); } catch(e) {}
+  }
+  activeCfiAnnotations = [];
+  if (highlightCfis.length === 0) return;
+  for (var i = 0; i < highlightCfis.length; i++) {
+    if (!highlightCfis[i]) continue;
+    try {
+      rendition.annotations.highlight(highlightCfis[i], {}, function(){}, "hl", {
+        "fill": "rgba(255, 200, 0, 0.5)", "fill-opacity": "0.5"
+      });
+      activeCfiAnnotations.push(highlightCfis[i]);
+    } catch(e) { dbg("CFI highlight err: " + e); }
+  }
+}
+
+function doHighlight() {
+  if (!rendition) return;
+  var contents = rendition.getContents();
+  if (!contents || contents.length === 0) return;
+  for (var i = 0; i < contents.length; i++) {
+    var doc = contents[i].document;
+    if (!doc) continue;
+    // Remove existing manual highlights.
+    var existing = doc.querySelectorAll(".engreader-hl");
+    for (var j = 0; j < existing.length; j++) {
+      var parent = existing[j].parentNode;
+      parent.replaceChild(doc.createTextNode(existing[j].textContent), existing[j]);
+      parent.normalize();
+    }
+    // Apply text-based highlights only for items without CFI.
+    for (var k = 0; k < highlightTexts.length; k++) {
+      if (highlightCfis.length > k && highlightCfis[k]) continue;
+      highlightTextInDoc(doc, highlightTexts[k]);
+    }
+  }
+  // Apply CFI-based highlights via Epub.js annotations API.
+  applyCfiHighlights();
+}
+
+function highlightTextInDoc(doc, text) {
+  if (!text) return;
+  var body = doc.body;
+  if (!body) return;
+  var walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT, null, false);
+  var nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (var i = 0; i < nodes.length; i++) {
+    var node = nodes[i];
+    var idx = node.textContent.indexOf(text);
+    while (idx !== -1) {
+      var range = doc.createRange();
+      range.setStart(node, idx);
+      range.setEnd(node, idx + text.length);
+      var span = doc.createElement("span");
+      span.className = "engreader-hl";
+      span.style.backgroundColor = "rgba(255, 200, 0, 0.5)";
+      span.style.borderRadius = "2px";
+      range.surroundContents(span);
+      // After surroundContents, the node has been split. Move to the node after the span.
+      node = span.nextSibling;
+      if (!node) break;
+      idx = node.textContent.indexOf(text);
+    }
   }
 }
 

@@ -7,16 +7,20 @@ class PdfReaderView extends StatefulWidget {
   final String filePath;
 
   /// Invoked when the user confirms annotation in the native popover.
-  /// This should directly trigger LLM parsing (no extra confirmation needed).
-  final Future<void> Function(String text, double yPosition) onAnnotateConfirmed;
+  final Future<void> Function(String text, double yPosition,
+      {int? charStart, int? charEnd}) onAnnotateConfirmed;
 
   final void Function(int page) onPageChanged;
+
+  /// Page-indexed highlights: {pageIndex: [{text, charStart, charEnd}, ...]}
+  final Map<int, List<Map<String, dynamic>>> pageHighlights;
 
   const PdfReaderView({
     super.key,
     required this.filePath,
     required this.onAnnotateConfirmed,
     required this.onPageChanged,
+    this.pageHighlights = const {},
   });
 
   @override
@@ -29,12 +33,40 @@ class _PdfReaderViewState extends State<PdfReaderView> {
   int _pageCount = 0;
   int _currentPage = 0;
 
+  int _lastHighlightCount = 0;
+
   @override
   void initState() {
     super.initState();
     _channel.setMethodCallHandler(_handleNativeCall);
     _restoreProgress();
+    // Delay initial highlights to wait for native view to load document.
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (!mounted) return;
+      _sendHighlights();
+    });
   }
+
+  @override
+  void didUpdateWidget(PdfReaderView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final newCount = widget.pageHighlights.values
+        .fold<int>(0, (sum, list) => sum + list.length);
+    if (newCount != _lastHighlightCount) {
+      _sendHighlights();
+    }
+  }
+
+  void _sendHighlights() {
+    _lastHighlightCount = widget.pageHighlights.values
+        .fold<int>(0, (sum, list) => sum + list.length);
+    final encoded = widget.pageHighlights.map(
+        (k, v) => MapEntry(k.toString(), v));
+    _channel.invokeMethod('setHighlights', {
+      'pageHighlights': encoded,
+    }).catchError((_) {});
+  }
+
 
   Future<void> _restoreProgress() async {
     final progress =
@@ -56,7 +88,11 @@ class _PdfReaderViewState extends State<PdfReaderView> {
         final args = call.arguments as Map;
         final text = args['text'] as String;
         final yPosition = (args['yPosition'] as num?)?.toDouble() ?? 0.0;
-        await widget.onAnnotateConfirmed(text, yPosition);
+        final charStart = (args['charStart'] as num?)?.toInt();
+        final charEnd = (args['charEnd'] as num?)?.toInt();
+        await widget.onAnnotateConfirmed(text, yPosition,
+            charStart: charStart != null && charStart >= 0 ? charStart : null,
+            charEnd: charEnd != null && charEnd >= 0 ? charEnd : null);
         break;
       case 'onPageChanged':
         final page = call.arguments as int;

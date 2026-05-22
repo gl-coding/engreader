@@ -15,12 +15,17 @@ class EpubChapter {
 
 class EpubReaderView extends StatefulWidget {
   final String filePath;
-  final Future<void> Function(String text, double yPosition) onAnnotateConfirmed;
+  final Future<void> Function(String text, double yPosition,
+      {int? charStart, int? charEnd, String? cfiRange}) onAnnotateConfirmed;
+  final List<Map<String, String>> highlights;
+  final void Function(int page)? onPageChanged;
 
   const EpubReaderView({
     super.key,
     required this.filePath,
     required this.onAnnotateConfirmed,
+    this.highlights = const [],
+    this.onPageChanged,
   });
 
   @override
@@ -30,6 +35,7 @@ class EpubReaderView extends StatefulWidget {
 class _EpubReaderViewState extends State<EpubReaderView> {
   static const _channel = MethodChannel('com.engreader/pdfkit');
   final _server = LocalFileServer();
+  final _webViewKey = GlobalKey();
   InAppWebViewController? _webViewController;
   List<EpubChapter> _chapters = [];
   int _selectedChapter = 0;
@@ -50,6 +56,28 @@ class _EpubReaderViewState extends State<EpubReaderView> {
     _channel.setMethodCallHandler(_handleNativeCall);
     _loadSavedProgress();
     _setupServer();
+  }
+
+  @override
+  void didUpdateWidget(EpubReaderView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.highlights.length != widget.highlights.length) {
+      _applyHighlights();
+    }
+  }
+
+  void _applyHighlights() {
+    if (_webViewController == null) return;
+    final items = widget.highlights.map((h) {
+      final text = (h['text'] ?? '').replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+      final cfi = (h['cfiRange'] ?? '').replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+      if (cfi.isNotEmpty) {
+        return '{"text":"$text","cfiRange":"$cfi"}';
+      }
+      return '{"text":"$text"}';
+    }).join(',');
+    _webViewController!.evaluateJavascript(
+        source: 'applyHighlights([$items]);');
   }
 
   Future<void> _loadSavedProgress() async {
@@ -81,6 +109,7 @@ class _EpubReaderViewState extends State<EpubReaderView> {
 
   @override
   void dispose() {
+    _webViewController = null;
     _server.stop();
     super.dispose();
   }
@@ -90,9 +119,13 @@ class _EpubReaderViewState extends State<EpubReaderView> {
       final args = call.arguments as Map;
       final text = args['text'] as String;
       final yPosition = (args['yPosition'] as num?)?.toDouble() ?? 0.0;
-      await widget.onAnnotateConfirmed(text, yPosition);
+      final cfi = _lastSelectedCfi;
+      await widget.onAnnotateConfirmed(text, yPosition,
+          cfiRange: (cfi != null && cfi.isNotEmpty) ? cfi : null);
     }
   }
+
+  String? _lastSelectedCfi;
 
   Future<void> _setupServer() async {
     try {
@@ -147,10 +180,20 @@ class _EpubReaderViewState extends State<EpubReaderView> {
         if (args.isEmpty) return;
         final data = args[0] as Map;
         final text = data['text'] as String? ?? '';
-        final screenX = (data['x'] as num?)?.toDouble() ?? 200;
-        final screenY = (data['y'] as num?)?.toDouble() ?? 200;
+        final jsX = (data['x'] as num?)?.toDouble() ?? 200;
+        final jsY = (data['y'] as num?)?.toDouble() ?? 200;
+        _lastSelectedCfi = data['cfiRange'] as String? ?? '';
 
         if (text.isNotEmpty) {
+          final renderBox = _webViewKey.currentContext
+              ?.findRenderObject() as RenderBox?;
+          double screenX = jsX;
+          double screenY = jsY;
+          if (renderBox != null) {
+            final offset = renderBox.localToGlobal(Offset.zero);
+            screenX = offset.dx + jsX;
+            screenY = offset.dy + jsY;
+          }
           _channel.invokeMethod('showAnnotatePopover', {
             'text': text,
             'yPosition': 0.0,
@@ -196,6 +239,8 @@ class _EpubReaderViewState extends State<EpubReaderView> {
             _locationsReady = true;
           }
         });
+        // Notify parent of page change for annotation filtering.
+        widget.onPageChanged?.call(page);
         // Persist reading progress.
         if (cfi.isNotEmpty) {
           SettingsService.saveReadingProgress(widget.filePath, {
@@ -235,13 +280,18 @@ class _EpubReaderViewState extends State<EpubReaderView> {
   void _onLoadStop(InAppWebViewController controller, WebUri? url) {
     final epubUrl = 'http://127.0.0.1:${_server.port}/book.epub';
     controller.evaluateJavascript(source: "loadBook('$epubUrl');");
-    // Restore saved reading position after book renders.
     if (_savedCfi != null) {
       Future.delayed(const Duration(milliseconds: 800), () {
-        controller.evaluateJavascript(
+        if (!mounted) return;
+        _webViewController?.evaluateJavascript(
             source: "goToCfi('${_savedCfi!.replaceAll("'", "\\'")}');");
       });
     }
+    // Apply initial highlights after book loads.
+    Future.delayed(const Duration(milliseconds: 1200), () {
+      if (!mounted) return;
+      _applyHighlights();
+    });
   }
 
   void _goToChapter(int index) {
@@ -319,6 +369,7 @@ class _EpubReaderViewState extends State<EpubReaderView> {
           child: Stack(
             children: [
               InAppWebView(
+                key: _webViewKey,
                 initialUrlRequest: URLRequest(url: WebUri(_readerUrl!)),
                 initialSettings: InAppWebViewSettings(
                   javaScriptEnabled: true,

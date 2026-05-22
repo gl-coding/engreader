@@ -6,13 +6,18 @@ import 'package:engreader/services/settings_service.dart';
 class TxtReaderView extends StatefulWidget {
   final String filePath;
   final String content;
-  final Future<void> Function(String text, double yPosition) onAnnotateConfirmed;
+  final Future<void> Function(String text, double yPosition,
+      {int? charStart, int? charEnd}) onAnnotateConfirmed;
+  final List<String> highlightedTexts;
+  final List<({int start, int end})> highlightRanges;
 
   const TxtReaderView({
     super.key,
     required this.filePath,
     required this.content,
     required this.onAnnotateConfirmed,
+    this.highlightedTexts = const [],
+    this.highlightRanges = const [],
   });
 
   @override
@@ -23,7 +28,10 @@ class _TxtReaderViewState extends State<TxtReaderView> {
   static const _channel = MethodChannel('com.engreader/pdfkit');
   final _scrollController = ScrollController();
   Offset? _lastPointerGlobalPos;
+  Offset? _selectionStartPos;
   String? _lastNotifiedText;
+  int? _lastSelStart;
+  int? _lastSelEnd;
 
   @override
   void initState() {
@@ -58,7 +66,8 @@ class _TxtReaderViewState extends State<TxtReaderView> {
       final args = call.arguments as Map;
       final text = args['text'] as String;
       final yPosition = (args['yPosition'] as num?)?.toDouble() ?? 0.0;
-      await widget.onAnnotateConfirmed(text, yPosition);
+      await widget.onAnnotateConfirmed(text, yPosition,
+          charStart: _lastSelStart, charEnd: _lastSelEnd);
     }
   }
 
@@ -71,19 +80,34 @@ class _TxtReaderViewState extends State<TxtReaderView> {
     if (text.isEmpty) return;
     if (text == _lastNotifiedText) return;
     _lastNotifiedText = text;
+    _lastSelStart = selection.start;
+    _lastSelEnd = selection.end;
 
     final yPos = _scrollController.hasClients
         ? _scrollController.offset /
             (_scrollController.position.maxScrollExtent + 1)
         : 0.0;
 
-    // Show native NSPopover via MethodChannel.
-    final pos = _lastPointerGlobalPos;
+    // Anchor popover above selection: X at midpoint, Y at topmost point.
+    final start = _selectionStartPos;
+    final end = _lastPointerGlobalPos;
+    double screenX = 200.0;
+    double screenY = 200.0;
+    if (start != null && end != null) {
+      screenX = (start.dx + end.dx) / 2;
+      screenY = start.dy < end.dy ? start.dy : end.dy;
+    } else if (start != null) {
+      screenX = start.dx;
+      screenY = start.dy;
+    } else if (end != null) {
+      screenX = end.dx;
+      screenY = end.dy;
+    }
     _channel.invokeMethod('showAnnotatePopover', {
       'text': text,
       'yPosition': yPos,
-      'screenX': pos?.dx ?? 200.0,
-      'screenY': pos?.dy ?? 200.0,
+      'screenX': screenX,
+      'screenY': screenY,
     });
   }
 
@@ -94,12 +118,83 @@ class _TxtReaderViewState extends State<TxtReaderView> {
     super.dispose();
   }
 
+  TextSpan _buildHighlightedSpan(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final baseStyle = TextStyle(
+      fontSize: 16,
+      height: 1.8,
+      color: colorScheme.onSurface,
+      fontFamily: 'Georgia',
+    );
+    final highlightStyle = baseStyle.copyWith(
+      backgroundColor: Colors.yellow.withValues(alpha: 0.35),
+    );
+
+    if (widget.highlightRanges.isEmpty && widget.highlightedTexts.isEmpty) {
+      return TextSpan(text: widget.content, style: baseStyle);
+    }
+
+    final content = widget.content;
+    final matches = <_MatchRange>[];
+
+    // Use precise ranges when available.
+    for (final r in widget.highlightRanges) {
+      if (r.start >= 0 && r.end <= content.length && r.start < r.end) {
+        matches.add(_MatchRange(r.start, r.end));
+      }
+    }
+
+    // Fallback: text search for annotations without position data.
+    for (final ht in widget.highlightedTexts) {
+      int searchFrom = 0;
+      while (true) {
+        final idx = content.indexOf(ht, searchFrom);
+        if (idx == -1) break;
+        matches.add(_MatchRange(idx, idx + ht.length));
+        searchFrom = idx + ht.length;
+      }
+    }
+
+    if (matches.isEmpty) {
+      return TextSpan(text: content, style: baseStyle);
+    }
+
+    matches.sort((a, b) => a.start.compareTo(b.start));
+
+    // Merge overlapping ranges.
+    final merged = <_MatchRange>[];
+    for (final m in matches) {
+      if (merged.isNotEmpty && m.start <= merged.last.end) {
+        merged.last = _MatchRange(
+            merged.last.start, m.end > merged.last.end ? m.end : merged.last.end);
+      } else {
+        merged.add(m);
+      }
+    }
+
+    final spans = <TextSpan>[];
+    int lastEnd = 0;
+    for (final range in merged) {
+      if (range.start > lastEnd) {
+        spans.add(TextSpan(text: content.substring(lastEnd, range.start), style: baseStyle));
+      }
+      spans.add(TextSpan(text: content.substring(range.start, range.end), style: highlightStyle));
+      lastEnd = range.end;
+    }
+    if (lastEnd < content.length) {
+      spans.add(TextSpan(text: content.substring(lastEnd), style: baseStyle));
+    }
+
+    return TextSpan(children: spans);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Listener(
-      onPointerDown: (event) => _lastPointerGlobalPos = event.position,
+      onPointerDown: (event) {
+        _lastPointerGlobalPos = event.position;
+        _selectionStartPos = event.position;
+      },
       onPointerMove: (event) {
         if (event.kind == PointerDeviceKind.mouse ||
             event.kind == PointerDeviceKind.stylus ||
@@ -113,18 +208,18 @@ class _TxtReaderViewState extends State<TxtReaderView> {
         child: SingleChildScrollView(
           controller: _scrollController,
           physics: const BouncingScrollPhysics(),
-          child: SelectableText(
-            widget.content,
-            style: TextStyle(
-              fontSize: 16,
-              height: 1.8,
-              color: colorScheme.onSurface,
-              fontFamily: 'Georgia',
-            ),
+          child: SelectableText.rich(
+            _buildHighlightedSpan(context),
             onSelectionChanged: _handleSelectionChanged,
           ),
         ),
       ),
     );
   }
+}
+
+class _MatchRange {
+  int start;
+  int end;
+  _MatchRange(this.start, this.end);
 }

@@ -103,42 +103,31 @@ class _MainLayoutState extends State<MainLayout> {
     });
   }
 
-  Future<void> _runLlmAndAddAnnotation(String text, double yPosition) async {
+  Future<void> _runLlmAndAddAnnotation(
+    String text,
+    double yPosition, {
+    int? charStart,
+    int? charEnd,
+    String? cfiRange,
+  }) async {
     if (_currentFilePath == null) return;
 
     final isWord = !text.contains(' ') || text.split(' ').length <= 2;
     final type = isWord ? AnnotationType.word : AnnotationType.sentence;
 
-    final loadingAnnotation = Annotation(
+    final annotation = Annotation(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       selectedText: text,
-      translation: '正在解析...',
+      translation: '', // 暂不请求 LLM，先记录单词
       type: type,
       pageIndex: _currentPage,
       yPosition: yPosition,
+      charStart: charStart,
+      charEnd: charEnd,
+      cfiRange: cfiRange,
     );
 
-    setState(() => _annotations.add(loadingAnnotation));
-
-    final llm = LlmService(_llmConfig);
-    final result = isWord
-        ? await llm.translateWord(text)
-        : await llm.translateSentence(text);
-
-    final annotation = Annotation(
-      id: loadingAnnotation.id,
-      selectedText: text,
-      translation: result,
-      type: type,
-      pageIndex: _currentPage,
-      yPosition: yPosition,
-    );
-
-    setState(() {
-      _annotations.removeWhere((a) => a.id == loadingAnnotation.id);
-      _annotations.add(annotation);
-    });
-
+    setState(() => _annotations.add(annotation));
     await AnnotationStore.save(_currentFilePath!, _annotations);
   }
 
@@ -178,6 +167,19 @@ class _MainLayoutState extends State<MainLayout> {
     if (_currentFilePath != null) {
       await AnnotationStore.save(_currentFilePath!, _annotations);
     }
+  }
+
+  /// Build page-indexed highlight data for PDF native.
+  Map<int, List<Map<String, dynamic>>> _buildPageHighlights() {
+    final map = <int, List<Map<String, dynamic>>>{};
+    for (final a in _annotations) {
+      map.putIfAbsent(a.pageIndex, () => []).add({
+        'text': a.selectedText,
+        'charStart': a.charStart ?? -1,
+        'charEnd': a.charEnd ?? -1,
+      });
+    }
+    return map;
   }
 
   @override
@@ -318,17 +320,35 @@ class _MainLayoutState extends State<MainLayout> {
           filePath: _currentFilePath!,
           onAnnotateConfirmed: _runLlmAndAddAnnotation,
           onPageChanged: (page) => setState(() => _currentPage = page),
+          pageHighlights: _buildPageHighlights(),
         );
       case 'epub':
         return EpubReaderView(
           filePath: _currentFilePath!,
           onAnnotateConfirmed: _runLlmAndAddAnnotation,
+          highlights: _annotations
+              .where((a) => a.pageIndex == _currentPage)
+              .map((a) => {
+                    'text': a.selectedText,
+                    'cfiRange': a.cfiRange ?? '',
+                  })
+              .toList(),
+          onPageChanged: (page) => setState(() => _currentPage = page),
         );
       default:
+        final txtAnnotations = _annotations.where((a) => a.pageIndex == 0).toList();
         return TxtReaderView(
           filePath: _currentFilePath!,
           content: _sourceText ?? '',
           onAnnotateConfirmed: _runLlmAndAddAnnotation,
+          highlightRanges: txtAnnotations
+              .where((a) => a.charStart != null && a.charEnd != null)
+              .map((a) => (start: a.charStart!, end: a.charEnd!))
+              .toList(),
+          highlightedTexts: txtAnnotations
+              .where((a) => a.charStart == null)
+              .map((a) => a.selectedText)
+              .toList(),
         );
     }
   }
