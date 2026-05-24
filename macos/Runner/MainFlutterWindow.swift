@@ -40,6 +40,12 @@ class MainFlutterWindow: NSWindow {
     engLog("method channel registered")
 
     super.awakeFromNib()
+
+    // Full-content window style (titlebar blends with content)
+    self.titlebarAppearsTransparent = true
+    self.titleVisibility = .hidden
+    self.styleMask.insert(.fullSizeContentView)
+    self.isMovableByWindowBackground = true
   }
 }
 
@@ -57,8 +63,11 @@ class MacPDFPlatformViewFactory: NSObject, FlutterPlatformViewFactory {
     }
 
     func setHighlightsOnActiveView(pageHighlights: [Int: [[String: Any]]]) {
+        engLog("setHighlightsOnActiveView: activePlatformViews.count=\(activePlatformViews.count)")
         if let view = activePlatformViews.values.first {
             view.setHighlights(pageHighlights: pageHighlights)
+        } else {
+            engLog("setHighlightsOnActiveView: NO active view found!")
         }
     }
 
@@ -66,14 +75,16 @@ class MacPDFPlatformViewFactory: NSObject, FlutterPlatformViewFactory {
         withViewIdentifier viewId: Int64,
         arguments args: Any?
     ) -> NSView {
-        engLog("MacPDFPlatformViewFactory.create called, viewId=\(viewId)")
+        engLog("MacPDFPlatformViewFactory.create called, viewId=\(viewId), clearing \(activePlatformViews.count) old views")
+        // Clear old views to ensure setHighlightsOnActiveView targets the new one.
+        activePlatformViews.removeAll()
         let platformView = MacPDFPlatformView(
             viewId: viewId,
             args: args as? [String: Any],
             messenger: messenger
         )
         activePlatformViews[viewId] = platformView
-        engLog("MacPDFPlatformView created and retained")
+        engLog("MacPDFPlatformView created and retained, viewId=\(viewId)")
         return platformView.view()
     }
 
@@ -87,8 +98,12 @@ class MacPDFPlatformViewFactory: NSObject, FlutterPlatformViewFactory {
 class AnnotatePopoverViewController: NSViewController {
     var text: String = ""
     var onAnnotate: (() -> Void)?
+    var onAsk: ((String) -> Void)?
     private var typeLabel: NSTextField?
     private var textLabel: NSTextField?
+    private var askField: NSTextField?
+    private var askContainer: NSView?
+    private var mainContainer: NSView?
 
     override func loadView() {
         let isWord = !text.contains(" ") || text.split(separator: " ").count <= 2
@@ -97,8 +112,13 @@ class AnnotatePopoverViewController: NSViewController {
             ? String(text.prefix(50)) + "…"
             : text
 
+        let outerContainer = NSView()
+        outerContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        // Main row
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
+        self.mainContainer = container
 
         let tLabel = NSTextField(labelWithString: typeText)
         tLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
@@ -117,32 +137,87 @@ class AnnotatePopoverViewController: NSViewController {
         txLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         self.textLabel = txLabel
 
-        let button = NSButton(title: "批注", target: self, action: #selector(annotateClicked))
-        button.bezelStyle = .rounded
-        button.keyEquivalent = "\r"
-        button.translatesAutoresizingMaskIntoConstraints = false
+        let annotateBtn = NSButton(title: "批注", target: self, action: #selector(annotateClicked))
+        annotateBtn.bezelStyle = .rounded
+        annotateBtn.keyEquivalent = "\r"
+        annotateBtn.translatesAutoresizingMaskIntoConstraints = false
+
+        let askBtn = NSButton(title: "提问", target: self, action: #selector(askClicked))
+        askBtn.bezelStyle = .rounded
+        askBtn.translatesAutoresizingMaskIntoConstraints = false
 
         container.addSubview(tLabel)
         container.addSubview(txLabel)
-        container.addSubview(button)
+        container.addSubview(annotateBtn)
+        container.addSubview(askBtn)
 
         NSLayoutConstraint.activate([
             container.heightAnchor.constraint(equalToConstant: 44),
-            container.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
-            container.widthAnchor.constraint(lessThanOrEqualToConstant: 480),
 
             tLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             tLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
 
             txLabel.leadingAnchor.constraint(equalTo: tLabel.trailingAnchor, constant: 8),
             txLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            txLabel.trailingAnchor.constraint(lessThanOrEqualTo: button.leadingAnchor, constant: -12),
+            txLabel.trailingAnchor.constraint(lessThanOrEqualTo: annotateBtn.leadingAnchor, constant: -12),
 
-            button.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            annotateBtn.trailingAnchor.constraint(equalTo: askBtn.leadingAnchor, constant: -6),
+            annotateBtn.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+
+            askBtn.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            askBtn.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
 
-        self.view = container
+        // Ask input row (hidden by default)
+        let askRow = NSView()
+        askRow.translatesAutoresizingMaskIntoConstraints = false
+        askRow.isHidden = true
+        self.askContainer = askRow
+
+        let inputField = NSTextField()
+        inputField.placeholderString = "输入你的问题..."
+        inputField.font = NSFont.systemFont(ofSize: 13)
+        inputField.translatesAutoresizingMaskIntoConstraints = false
+        inputField.target = self
+        inputField.action = #selector(askSubmitted)
+        self.askField = inputField
+
+        let submitBtn = NSButton(title: "发送", target: self, action: #selector(askSubmitted))
+        submitBtn.bezelStyle = .rounded
+        submitBtn.translatesAutoresizingMaskIntoConstraints = false
+
+        askRow.addSubview(inputField)
+        askRow.addSubview(submitBtn)
+
+        NSLayoutConstraint.activate([
+            askRow.heightAnchor.constraint(equalToConstant: 36),
+
+            inputField.leadingAnchor.constraint(equalTo: askRow.leadingAnchor, constant: 12),
+            inputField.centerYAnchor.constraint(equalTo: askRow.centerYAnchor),
+            inputField.trailingAnchor.constraint(equalTo: submitBtn.leadingAnchor, constant: -8),
+
+            submitBtn.trailingAnchor.constraint(equalTo: askRow.trailingAnchor, constant: -12),
+            submitBtn.centerYAnchor.constraint(equalTo: askRow.centerYAnchor),
+        ])
+
+        outerContainer.addSubview(container)
+        outerContainer.addSubview(askRow)
+
+        NSLayoutConstraint.activate([
+            outerContainer.widthAnchor.constraint(greaterThanOrEqualToConstant: 360),
+            outerContainer.widthAnchor.constraint(lessThanOrEqualToConstant: 500),
+
+            container.topAnchor.constraint(equalTo: outerContainer.topAnchor),
+            container.leadingAnchor.constraint(equalTo: outerContainer.leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: outerContainer.trailingAnchor),
+
+            askRow.topAnchor.constraint(equalTo: container.bottomAnchor),
+            askRow.leadingAnchor.constraint(equalTo: outerContainer.leadingAnchor),
+            askRow.trailingAnchor.constraint(equalTo: outerContainer.trailingAnchor),
+            askRow.bottomAnchor.constraint(equalTo: outerContainer.bottomAnchor),
+        ])
+
+        self.view = outerContainer
     }
 
     func updateText(_ newText: String) {
@@ -155,10 +230,25 @@ class AnnotatePopoverViewController: NSViewController {
         typeLabel?.stringValue = typeText
         typeLabel?.textColor = isWord ? NSColor.systemBlue : NSColor.systemPurple
         textLabel?.stringValue = preview
+        // Hide ask row when text changes
+        askContainer?.isHidden = true
+        askField?.stringValue = ""
     }
 
     @objc private func annotateClicked() {
         onAnnotate?()
+    }
+
+    @objc private func askClicked() {
+        askContainer?.isHidden = false
+        askField?.becomeFirstResponder()
+    }
+
+    @objc private func askSubmitted() {
+        let question = askField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !question.isEmpty {
+            onAsk?(question)
+        }
     }
 }
 
@@ -321,6 +411,24 @@ class MacPDFPlatformView: NSObject {
                 self.pdfView.clearSelection()
                 self.lastNotifiedText = ""
             }
+            vc.onAsk = { [weak self] question in
+                guard let self = self else { return }
+                var args: [String: Any] = [
+                    "text": text,
+                    "question": question,
+                    "page": page,
+                    "yPosition": yPosition,
+                ]
+                if charStart >= 0 && charEnd >= 0 {
+                    args["charStart"] = charStart
+                    args["charEnd"] = charEnd
+                }
+                self.channel.invokeMethod("onAskConfirmed", arguments: args)
+                self.annotatePopover?.close()
+                self.annotatePopover = nil
+                self.pdfView.clearSelection()
+                self.lastNotifiedText = ""
+            }
             return
         }
 
@@ -340,6 +448,24 @@ class MacPDFPlatformView: NSObject {
                 args["charEnd"] = charEnd
             }
             self.channel.invokeMethod("onAnnotateConfirmed", arguments: args)
+            self.annotatePopover?.close()
+            self.annotatePopover = nil
+            self.pdfView.clearSelection()
+            self.lastNotifiedText = ""
+        }
+        vc.onAsk = { [weak self] question in
+            guard let self = self else { return }
+            var args: [String: Any] = [
+                "text": text,
+                "question": question,
+                "page": page,
+                "yPosition": yPosition,
+            ]
+            if charStart >= 0 && charEnd >= 0 {
+                args["charStart"] = charStart
+                args["charEnd"] = charEnd
+            }
+            self.channel.invokeMethod("onAskConfirmed", arguments: args)
             self.annotatePopover?.close()
             self.annotatePopover = nil
             self.pdfView.clearSelection()
@@ -366,7 +492,12 @@ class MacPDFPlatformView: NSObject {
     }
 
     func setHighlights(pageHighlights: [Int: [[String: Any]]]) {
-        guard let document = pdfView.document else { return }
+        guard let document = pdfView.document else {
+            engLog("setHighlights: NO document, skipping")
+            return
+        }
+
+        engLog("setHighlights called: \(pageHighlights.count) pages, doc.pageCount=\(document.pageCount)")
 
         for i in 0..<document.pageCount {
             guard let page = document.page(at: i) else { continue }
@@ -375,11 +506,21 @@ class MacPDFPlatformView: NSObject {
             }
         }
 
-        if pageHighlights.isEmpty { return }
+        if pageHighlights.isEmpty {
+            engLog("setHighlights: empty, cleared all")
+            return
+        }
 
+        var totalAdded = 0
         for (pageIndex, items) in pageHighlights {
-            guard let page = document.page(at: pageIndex) else { continue }
-            guard let pageText = page.string else { continue }
+            guard let page = document.page(at: pageIndex) else {
+                engLog("setHighlights: page \(pageIndex) not found")
+                continue
+            }
+            guard let pageText = page.string else {
+                engLog("setHighlights: page \(pageIndex) has no text")
+                continue
+            }
             let nsPageText = pageText as NSString
 
             for item in items {
@@ -388,16 +529,18 @@ class MacPDFPlatformView: NSObject {
                 let charEnd = item["charEnd"] as? Int ?? -1
 
                 if charStart >= 0 && charEnd > charStart && charEnd <= nsPageText.length {
-                    // Use precise character range.
                     let range = NSRange(location: charStart, length: charEnd - charStart)
                     if let selection = page.selection(for: range) {
                         let bounds = selection.bounds(for: page)
                         let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
                         annotation.color = NSColor.yellow.withAlphaComponent(0.35)
                         page.addAnnotation(annotation)
+                        totalAdded += 1
+                        engLog("setHighlights: page \(pageIndex) charRange \(charStart)-\(charEnd) -> OK bounds=\(bounds)")
+                    } else {
+                        engLog("setHighlights: page \(pageIndex) charRange \(charStart)-\(charEnd) -> selection FAILED")
                     }
                 } else if !text.isEmpty {
-                    // Fallback: search by text on this page.
                     let range = nsPageText.range(of: text, options: [.caseInsensitive])
                     if range.location != NSNotFound {
                         if let selection = page.selection(for: range) {
@@ -405,11 +548,18 @@ class MacPDFPlatformView: NSObject {
                             let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
                             annotation.color = NSColor.yellow.withAlphaComponent(0.35)
                             page.addAnnotation(annotation)
+                            totalAdded += 1
+                            engLog("setHighlights: page \(pageIndex) textSearch '\(text.prefix(20))' -> OK")
+                        } else {
+                            engLog("setHighlights: page \(pageIndex) textSearch '\(text.prefix(20))' -> selection FAILED")
                         }
+                    } else {
+                        engLog("setHighlights: page \(pageIndex) textSearch '\(text.prefix(20))' -> NOT FOUND in pageText(\(nsPageText.length) chars)")
                     }
                 }
             }
         }
+        engLog("setHighlights done: added \(totalAdded) annotations")
     }
 
     private func loadDocument(at path: String) {
@@ -548,6 +698,16 @@ class MacPDFMethodHandler {
                 self.txtAnnotatePopover?.close()
                 self.txtAnnotatePopover = nil
             }
+            vc.onAsk = { [weak self] question in
+                guard let self = self else { return }
+                self.channel.invokeMethod("onAskConfirmed", arguments: [
+                    "text": text,
+                    "question": question,
+                    "yPosition": yPosition,
+                ] as [String: Any])
+                self.txtAnnotatePopover?.close()
+                self.txtAnnotatePopover = nil
+            }
             result(nil)
             return
         }
@@ -560,6 +720,16 @@ class MacPDFMethodHandler {
             guard let self = self else { return }
             self.channel.invokeMethod("onAnnotateConfirmed", arguments: [
                 "text": text,
+                "yPosition": yPosition,
+            ] as [String: Any])
+            self.txtAnnotatePopover?.close()
+            self.txtAnnotatePopover = nil
+        }
+        vc.onAsk = { [weak self] question in
+            guard let self = self else { return }
+            self.channel.invokeMethod("onAskConfirmed", arguments: [
+                "text": text,
+                "question": question,
                 "yPosition": yPosition,
             ] as [String: Any])
             self.txtAnnotatePopover?.close()

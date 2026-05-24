@@ -4,6 +4,7 @@ import 'package:engreader/models/annotation.dart';
 import 'package:engreader/models/llm_config.dart';
 import 'package:engreader/services/annotation_store.dart';
 import 'package:engreader/services/llm_service.dart';
+import 'package:engreader/services/log_service.dart';
 import 'package:engreader/services/settings_service.dart';
 import 'package:engreader/services/pdf_export_service.dart';
 import 'package:engreader/services/file_library_service.dart';
@@ -13,6 +14,8 @@ import 'package:engreader/widgets/annotation_panel.dart';
 import 'package:engreader/widgets/txt_reader_view.dart';
 import 'package:engreader/widgets/pdf_reader_view.dart';
 import 'package:engreader/widgets/epub_reader_view.dart';
+import 'package:engreader/widgets/web_reader_view.dart';
+import 'package:engreader/screens/settings_screen.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -39,6 +42,8 @@ class _MainLayoutState extends State<MainLayout> {
         return Icons.picture_as_pdf;
       case 'epub':
         return Icons.book;
+      case 'web':
+        return Icons.language;
       default:
         return Icons.text_snippet;
     }
@@ -50,6 +55,8 @@ class _MainLayoutState extends State<MainLayout> {
         return Colors.red;
       case 'epub':
         return Colors.green;
+      case 'web':
+        return Colors.orange;
       default:
         return Colors.blue;
     }
@@ -68,6 +75,20 @@ class _MainLayoutState extends State<MainLayout> {
 
   Future<void> _openFile(String filePath, String fileType) async {
     var actualPath = filePath;
+
+    if (fileType == 'web') {
+      await SettingsService.addRecentFile(filePath);
+      final annotations = await AnnotationStore.load(filePath);
+      LogService.log('FILE', 'openFile: type=web url=$filePath annotations=${annotations.length}');
+      setState(() {
+        _currentFilePath = filePath;
+        _currentFileType = 'web';
+        _sourceText = null;
+        _annotations = annotations;
+        _currentPage = 0;
+      });
+      return;
+    }
 
     // Ensure file is inside sandbox (needed for native PDFView access).
     final inLibrary = await FileLibraryService.isInLibrary(filePath);
@@ -93,6 +114,7 @@ class _MainLayoutState extends State<MainLayout> {
     }
 
     final annotations = await AnnotationStore.load(actualPath);
+    LogService.log('FILE', 'openFile: type=$fileType path=$actualPath annotations=${annotations.length}');
 
     setState(() {
       _currentFilePath = actualPath;
@@ -115,11 +137,72 @@ class _MainLayoutState extends State<MainLayout> {
     final isWord = !text.contains(' ') || text.split(' ').length <= 2;
     final type = isWord ? AnnotationType.word : AnnotationType.sentence;
 
+    LogService.log('ANNOTATE', 'addAnnotation: type=$_currentFileType page=$_currentPage '
+        'text="${text.length > 40 ? text.substring(0, 40) : text}" '
+        'charStart=$charStart charEnd=$charEnd cfiRange=$cfiRange');
+
+    final templates = await SettingsService.getActiveTemplates();
+    String translation = '';
+
+    for (final template in templates) {
+      if (template.prompt.isEmpty) continue;
+      final config = await SettingsService.getLlmConfig();
+      if (config.apiKey.isEmpty) continue;
+      final service = LlmService(config);
+      final prompt = template.prompt.replaceAll('\$TEXT', text);
+      final result = await service.chat(prompt);
+      if (translation.isNotEmpty) {
+        translation += '\n\n--- ${template.name} ---\n$result';
+      } else {
+        translation = result;
+      }
+    }
+
     final annotation = Annotation(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       selectedText: text,
-      translation: '', // 暂不请求 LLM，先记录单词
+      translation: translation,
       type: type,
+      pageIndex: _currentPage,
+      yPosition: yPosition,
+      charStart: charStart,
+      charEnd: charEnd,
+      cfiRange: cfiRange,
+    );
+
+    setState(() => _annotations.add(annotation));
+    await AnnotationStore.save(_currentFilePath!, _annotations);
+    LogService.log('ANNOTATE', 'saved, total annotations=${_annotations.length}');
+  }
+
+  Future<void> _runAskAndAddAnnotation(
+    String text,
+    String question,
+    double yPosition, {
+    int? charStart,
+    int? charEnd,
+    String? cfiRange,
+  }) async {
+    if (_currentFilePath == null) return;
+
+    LogService.log('ASK', 'question="$question" text="${text.length > 30 ? text.substring(0, 30) : text}"');
+
+    String translation = '';
+    final config = await SettingsService.getLlmConfig();
+    if (config.apiKey.isNotEmpty) {
+      final service = LlmService(config);
+      final prompt =
+          '用户选中了以下英文文本：\n"$text"\n\n用户的问题：$question\n\n请用中文回答。';
+      translation = await service.chat(prompt);
+    } else {
+      translation = '（未配置 API Key，无法回答）';
+    }
+
+    final annotation = Annotation(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      selectedText: text,
+      translation: '❓ $question\n\n$translation',
+      type: AnnotationType.sentence,
       pageIndex: _currentPage,
       yPosition: yPosition,
       charStart: charStart,
@@ -169,6 +252,13 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
+  void _clearPageAnnotations() async {
+    setState(() => _annotations.removeWhere((a) => a.pageIndex == _currentPage));
+    if (_currentFilePath != null) {
+      await AnnotationStore.save(_currentFilePath!, _annotations);
+    }
+  }
+
   /// Build page-indexed highlight data for PDF native.
   Map<int, List<Map<String, dynamic>>> _buildPageHighlights() {
     final map = <int, List<Map<String, dynamic>>>{};
@@ -189,7 +279,39 @@ class _MainLayoutState extends State<MainLayout> {
         _annotations.where((a) => a.pageIndex == _currentPage).toList();
 
     return Scaffold(
-      body: _buildMainContent(colorScheme, pageAnnotations),
+      body: Stack(
+        children: [
+          _buildMainContent(colorScheme, pageAnnotations),
+          // Floating - left: sidebar toggle (fixed in window)
+          Positioned(
+            top: 38,
+            left: (_showSidebar ? 420 : 0) + 8.0,
+            child: _buildFloatingPill(
+              colorScheme,
+              child: InkWell(
+                onTap: () => setState(() => _showSidebar = !_showSidebar),
+                borderRadius: BorderRadius.circular(18),
+                child: SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: Icon(
+                    _showSidebar ? Icons.menu_open : Icons.menu,
+                    size: 18,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // Floating - right: actions (fixed in window, never moves)
+          if (_currentFilePath != null)
+            Positioned(
+              top: 8,
+              right: 8,
+              child: _buildFloatingActions(colorScheme),
+            ),
+        ],
+      ),
     );
   }
 
@@ -200,116 +322,102 @@ class _MainLayoutState extends State<MainLayout> {
           // Left sidebar
           if (_showSidebar)
             ResizablePanel(
-              initialWidth: 240,
-              minWidth: 180,
-              maxWidth: 400,
+              initialWidth: 420,
+              minWidth: 360,
+              maxWidth: 600,
               resizeFromLeft: false,
               child: Sidebar(
                 onFileSelected: _openFile,
               ),
             ),
-          // Main content
+          // Main content area
           Expanded(
-            child: Column(
+            child: Row(
               children: [
-                // Toolbar
-                Container(
-                  height: 44,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  decoration: BoxDecoration(
-                    color: colorScheme.surfaceContainerLow,
-                    border: Border(
-                      bottom: BorderSide(
-                          color: colorScheme.outlineVariant, width: 0.5),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: Icon(
-                          _showSidebar
-                              ? Icons.menu_open
-                              : Icons.menu,
-                          size: 20,
-                        ),
-                        onPressed: () =>
-                            setState(() => _showSidebar = !_showSidebar),
-                        tooltip: '侧边栏',
-                        iconSize: 20,
-                      ),
-                      if (_currentFilePath != null) ...[
-                        const SizedBox(width: 8),
-                        Icon(
-                          _fileIcon(_currentFileType!),
-                          size: 16,
-                          color: _fileColor(_currentFileType!),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          p.basename(_currentFilePath!),
-                          style: const TextStyle(
-                              fontSize: 13, fontWeight: FontWeight.w500),
-                        ),
-                      ],
-                      const Spacer(),
-                      if (_currentFilePath != null) ...[
-                        IconButton(
-                          icon: const Icon(Icons.picture_as_pdf_outlined,
-                              size: 20),
-                          onPressed: _exportPdf,
-                          tooltip: '导出 PDF',
-                          iconSize: 20,
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            _showAnnotationPanel
-                                ? Icons.chrome_reader_mode
-                                : Icons.chrome_reader_mode_outlined,
-                            size: 20,
-                          ),
-                          onPressed: () => setState(
-                              () => _showAnnotationPanel = !_showAnnotationPanel),
-                          tooltip: '批注面板',
-                          iconSize: 20,
-                        ),
-                      ],
-                      IconButton(
-                        icon: const Icon(Icons.settings_outlined, size: 20),
-                        onPressed: () =>
-                            Navigator.pushNamed(context, '/settings'),
-                        tooltip: '设置',
-                        iconSize: 20,
-                      ),
-                    ],
-                  ),
-                ),
-                // Reading area + annotation panel
+                // Reader content
                 Expanded(
                   child: _currentFilePath == null
                       ? _buildWelcome(colorScheme)
-                      : Row(
-                          children: [
-                            Expanded(
-                              child: _buildReaderView(),
-                            ),
-                            if (_showAnnotationPanel)
-                              ResizablePanel(
-                                initialWidth: 320,
-                                minWidth: 220,
-                                maxWidth: 550,
-                                resizeFromLeft: true,
-                                child: AnnotationPanel(
-                                  annotations: pageAnnotations,
-                                  onDelete: _deleteAnnotation,
-                                ),
-                              ),
-                          ],
-                        ),
+                      : _buildReaderView(),
                 ),
+                // Annotation sidebar (pushes content)
+                if (_currentFilePath != null && _showAnnotationPanel)
+                  Container(
+                    width: 300,
+                    decoration: BoxDecoration(
+                      color: colorScheme.surface,
+                      border: Border(
+                        left: BorderSide(
+                          color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+                          width: 0.5,
+                        ),
+                      ),
+                    ),
+                    child: AnnotationPanel(
+                      annotations: pageAnnotations,
+                      onDelete: _deleteAnnotation,
+                      onClearAll: _clearPageAnnotations,
+                    ),
+                  ),
               ],
             ),
           ),
         ],
+    );
+  }
+
+  Widget _buildFloatingPill(ColorScheme colorScheme, {required Widget child}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surface.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+        ),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildFloatingActions(ColorScheme colorScheme) {
+    return _buildFloatingPill(
+      colorScheme,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _FloatingActionBtn(
+                icon: Icons.picture_as_pdf_outlined,
+                tooltip: '导出 PDF',
+                onTap: _exportPdf,
+              ),
+              Container(
+                width: 1,
+                height: 20,
+                color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+              ),
+              _FloatingActionBtn(
+                icon: _showAnnotationPanel
+                    ? Icons.chrome_reader_mode
+                    : Icons.chrome_reader_mode_outlined,
+                tooltip: '批注面板',
+                onTap: () =>
+                    setState(() => _showAnnotationPanel = !_showAnnotationPanel),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -319,6 +427,10 @@ class _MainLayoutState extends State<MainLayout> {
         return PdfReaderView(
           filePath: _currentFilePath!,
           onAnnotateConfirmed: _runLlmAndAddAnnotation,
+          onAskConfirmed: (text, question, yPosition,
+              {int? charStart, int? charEnd}) =>
+              _runAskAndAddAnnotation(text, question, yPosition,
+                  charStart: charStart, charEnd: charEnd),
           onPageChanged: (page) => setState(() => _currentPage = page),
           pageHighlights: _buildPageHighlights(),
         );
@@ -326,6 +438,10 @@ class _MainLayoutState extends State<MainLayout> {
         return EpubReaderView(
           filePath: _currentFilePath!,
           onAnnotateConfirmed: _runLlmAndAddAnnotation,
+          onAskConfirmed: (text, question, yPosition,
+              {String? cfiRange}) =>
+              _runAskAndAddAnnotation(text, question, yPosition,
+                  cfiRange: cfiRange),
           highlights: _annotations
               .where((a) => a.pageIndex == _currentPage)
               .map((a) => {
@@ -335,12 +451,26 @@ class _MainLayoutState extends State<MainLayout> {
               .toList(),
           onPageChanged: (page) => setState(() => _currentPage = page),
         );
+      case 'web':
+        return WebReaderView(
+          url: _currentFilePath!,
+          onAnnotateConfirmed: _runLlmAndAddAnnotation,
+          onAskConfirmed: (text, question, yPosition) =>
+              _runAskAndAddAnnotation(text, question, yPosition),
+          highlightedTexts: _annotations
+              .map((a) => a.selectedText)
+              .toList(),
+        );
       default:
         final txtAnnotations = _annotations.where((a) => a.pageIndex == 0).toList();
         return TxtReaderView(
           filePath: _currentFilePath!,
           content: _sourceText ?? '',
           onAnnotateConfirmed: _runLlmAndAddAnnotation,
+          onAskConfirmed: (text, question, yPosition,
+              {int? charStart, int? charEnd}) =>
+              _runAskAndAddAnnotation(text, question, yPosition,
+                  charStart: charStart, charEnd: charEnd),
           highlightRanges: txtAnnotations
               .where((a) => a.charStart != null && a.charEnd != null)
               .map((a) => (start: a.charStart!, end: a.charEnd!))
@@ -375,6 +505,39 @@ class _MainLayoutState extends State<MainLayout> {
             style: TextStyle(color: colorScheme.onSurfaceVariant),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FloatingActionBtn extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _FloatingActionBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.transparent,
+          ),
+          child: Icon(icon, size: 20, color: colorScheme.onSurfaceVariant),
+        ),
       ),
     );
   }

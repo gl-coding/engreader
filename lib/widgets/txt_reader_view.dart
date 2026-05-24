@@ -8,6 +8,8 @@ class TxtReaderView extends StatefulWidget {
   final String content;
   final Future<void> Function(String text, double yPosition,
       {int? charStart, int? charEnd}) onAnnotateConfirmed;
+  final Future<void> Function(String text, String question, double yPosition,
+      {int? charStart, int? charEnd})? onAskConfirmed;
   final List<String> highlightedTexts;
   final List<({int start, int end})> highlightRanges;
 
@@ -16,6 +18,7 @@ class TxtReaderView extends StatefulWidget {
     required this.filePath,
     required this.content,
     required this.onAnnotateConfirmed,
+    this.onAskConfirmed,
     this.highlightedTexts = const [],
     this.highlightRanges = const [],
   });
@@ -68,6 +71,13 @@ class _TxtReaderViewState extends State<TxtReaderView> {
       final yPosition = (args['yPosition'] as num?)?.toDouble() ?? 0.0;
       await widget.onAnnotateConfirmed(text, yPosition,
           charStart: _lastSelStart, charEnd: _lastSelEnd);
+    } else if (call.method == 'onAskConfirmed') {
+      final args = call.arguments as Map;
+      final text = args['text'] as String;
+      final question = args['question'] as String;
+      final yPosition = (args['yPosition'] as num?)?.toDouble() ?? 0.0;
+      await widget.onAskConfirmed?.call(text, question, yPosition,
+          charStart: _lastSelStart, charEnd: _lastSelEnd);
     }
   }
 
@@ -88,20 +98,21 @@ class _TxtReaderViewState extends State<TxtReaderView> {
             (_scrollController.position.maxScrollExtent + 1)
         : 0.0;
 
-    // Anchor popover above selection: X at midpoint, Y at topmost point.
+    // Anchor popover above selection top edge.
     final start = _selectionStartPos;
     final end = _lastPointerGlobalPos;
     double screenX = 200.0;
     double screenY = 200.0;
     if (start != null && end != null) {
       screenX = (start.dx + end.dx) / 2;
-      screenY = start.dy < end.dy ? start.dy : end.dy;
+      // Use the higher Y (smaller value) minus line height offset for top edge.
+      screenY = (start.dy < end.dy ? start.dy : end.dy) - 12;
     } else if (start != null) {
       screenX = start.dx;
-      screenY = start.dy;
+      screenY = start.dy - 12;
     } else if (end != null) {
       screenX = end.dx;
-      screenY = end.dy;
+      screenY = end.dy - 12;
     }
     _channel.invokeMethod('showAnnotatePopover', {
       'text': text,

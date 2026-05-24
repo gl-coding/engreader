@@ -20,7 +20,7 @@ Format:
 Example: ...
 译: ...''';
 
-    return _chat(prompt);
+    return chat(prompt);
   }
 
   Future<String> translateSentence(String sentence) async {
@@ -37,10 +37,10 @@ Format:
 语法: ...
 词汇: word1 - 释义; word2 - 释义''';
 
-    return _chat(prompt);
+    return chat(prompt);
   }
 
-  Future<String> _chat(String prompt) async {
+  Future<String> chat(String prompt) async {
     if (config.apiKey.isEmpty) {
       return '请先在设置中配置 API Key';
     }

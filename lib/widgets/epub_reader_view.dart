@@ -17,6 +17,8 @@ class EpubReaderView extends StatefulWidget {
   final String filePath;
   final Future<void> Function(String text, double yPosition,
       {int? charStart, int? charEnd, String? cfiRange}) onAnnotateConfirmed;
+  final Future<void> Function(String text, String question, double yPosition,
+      {String? cfiRange})? onAskConfirmed;
   final List<Map<String, String>> highlights;
   final void Function(int page)? onPageChanged;
 
@@ -24,6 +26,7 @@ class EpubReaderView extends StatefulWidget {
     super.key,
     required this.filePath,
     required this.onAnnotateConfirmed,
+    this.onAskConfirmed,
     this.highlights = const [],
     this.onPageChanged,
   });
@@ -121,6 +124,14 @@ class _EpubReaderViewState extends State<EpubReaderView> {
       final yPosition = (args['yPosition'] as num?)?.toDouble() ?? 0.0;
       final cfi = _lastSelectedCfi;
       await widget.onAnnotateConfirmed(text, yPosition,
+          cfiRange: (cfi != null && cfi.isNotEmpty) ? cfi : null);
+    } else if (call.method == 'onAskConfirmed') {
+      final args = call.arguments as Map;
+      final text = args['text'] as String;
+      final question = args['question'] as String;
+      final yPosition = (args['yPosition'] as num?)?.toDouble() ?? 0.0;
+      final cfi = _lastSelectedCfi;
+      await widget.onAskConfirmed?.call(text, question, yPosition,
           cfiRange: (cfi != null && cfi.isNotEmpty) ? cfi : null);
     }
   }
