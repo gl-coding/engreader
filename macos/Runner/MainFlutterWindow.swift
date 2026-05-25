@@ -194,7 +194,15 @@ class AnnotatePopoverViewController: NSViewController {
         inputWrapper.layer?.borderColor = NSColor.separatorColor.cgColor
         inputWrapper.layer?.cornerRadius = 8
 
-        // Auto-growing text view (no scroll view, no scrollbar)
+        // NSScrollView wrapping NSTextView (scrollbar hidden, needed for proper cursor)
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        scrollView.autohidesScrollers = true
+
         let textView = AutoGrowingTextView()
         textView.font = NSFont.systemFont(ofSize: 13)
         textView.isEditable = true
@@ -206,10 +214,12 @@ class AnnotatePopoverViewController: NSViewController {
         textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainerInset = NSSize(width: 4, height: 6)
         textView.drawsBackground = false
-        textView.translatesAutoresizingMaskIntoConstraints = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
         textView.onTextChange = { [weak self] in
             self?.adjustInputHeight()
         }
+        scrollView.documentView = textView
         self.askTextView = textView
 
         // Arrow-up submit button (perfect circle using a wrapper view)
@@ -248,14 +258,14 @@ class AnnotatePopoverViewController: NSViewController {
         ])
         self.submitBtn = sendBtn
 
-        inputWrapper.addSubview(textView)
+        inputWrapper.addSubview(scrollView)
         inputWrapper.addSubview(sendWrapper)
 
         NSLayoutConstraint.activate([
-            textView.leadingAnchor.constraint(equalTo: inputWrapper.leadingAnchor, constant: 8),
-            textView.topAnchor.constraint(equalTo: inputWrapper.topAnchor, constant: 6),
-            textView.bottomAnchor.constraint(equalTo: inputWrapper.bottomAnchor, constant: -6),
-            textView.trailingAnchor.constraint(equalTo: sendWrapper.leadingAnchor, constant: -8),
+            scrollView.leadingAnchor.constraint(equalTo: inputWrapper.leadingAnchor, constant: 8),
+            scrollView.topAnchor.constraint(equalTo: inputWrapper.topAnchor, constant: 6),
+            scrollView.bottomAnchor.constraint(equalTo: inputWrapper.bottomAnchor, constant: -6),
+            scrollView.trailingAnchor.constraint(equalTo: sendWrapper.leadingAnchor, constant: -8),
 
             sendWrapper.trailingAnchor.constraint(equalTo: inputWrapper.trailingAnchor, constant: -8),
             sendWrapper.bottomAnchor.constraint(equalTo: inputWrapper.bottomAnchor, constant: -8),
@@ -348,7 +358,21 @@ class AnnotatePopoverViewController: NSViewController {
             self.askHeightConstraint?.constant = 48
             self.view.layoutSubtreeIfNeeded()
         }) {
-            self.view.window?.makeFirstResponder(self.askTextView)
+            self.focusTextView()
+        }
+    }
+
+    private func focusTextView() {
+        guard let textView = self.askTextView else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let textView = self?.askTextView else { return }
+            if let window = textView.window {
+                window.makeKeyAndOrderFront(nil)
+                window.makeFirstResponder(textView)
+                // Force insertion point visible by setting selection at position 0
+                textView.setSelectedRange(NSRange(location: 0, length: 0))
+                textView.needsDisplay = true
+            }
         }
     }
 
