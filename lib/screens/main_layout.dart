@@ -306,7 +306,7 @@ class _MainLayoutState extends State<MainLayout> {
           // Floating - right: actions (fixed in window, never moves)
           if (_currentFilePath != null)
             Positioned(
-              top: 8,
+              top: 38,
               right: 8,
               child: _buildFloatingActions(colorScheme),
             ),

@@ -143,40 +143,78 @@ class _PdfReaderViewState extends State<PdfReaderView> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final colorScheme = Theme.of(context).colorScheme;
+    return Stack(
       children: [
-        Expanded(
+        Positioned.fill(
           child: KeyedSubtree(key: _viewKey, child: _buildPlatformView()),
         ),
         if (_pageCount > 0)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerLow,
-              border: Border(
-                top: BorderSide(
-                    color: Theme.of(context).colorScheme.outlineVariant),
+          Positioned(
+            right: 12,
+            bottom: 24,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+                border: Border.all(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+                ),
               ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.chevron_left),
-                  onPressed: _currentPage > 0 ? _previousPage : null,
-                  iconSize: 20,
-                ),
-                Text(
-                  '${_currentPage + 1} / $_pageCount',
-                  style: const TextStyle(fontSize: 13),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.chevron_right),
-                  onPressed:
-                      _currentPage < _pageCount - 1 ? _nextPage : null,
-                  iconSize: 20,
-                ),
-              ],
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GestureDetector(
+                    onTap: _currentPage > 0 ? _previousPage : null,
+                    child: Icon(Icons.keyboard_arrow_up,
+                        size: 20,
+                        color: _currentPage > 0
+                            ? colorScheme.onSurfaceVariant
+                            : colorScheme.outlineVariant),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_currentPage + 1}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Container(
+                      width: 20,
+                      height: 1,
+                      color: colorScheme.outlineVariant,
+                    ),
+                  ),
+                  Text(
+                    '$_pageCount',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  GestureDetector(
+                    onTap: _currentPage < _pageCount - 1 ? _nextPage : null,
+                    child: Icon(Icons.keyboard_arrow_down,
+                        size: 20,
+                        color: _currentPage < _pageCount - 1
+                            ? colorScheme.onSurfaceVariant
+                            : colorScheme.outlineVariant),
+                  ),
+                ],
+              ),
             ),
           ),
       ],

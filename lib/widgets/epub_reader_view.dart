@@ -334,169 +334,181 @@ class _EpubReaderViewState extends State<EpubReaderView> {
       );
     }
 
-    return Column(
+    return Stack(
       children: [
-        Container(
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerLow,
-            border: Border(
-              bottom: BorderSide(color: colorScheme.outlineVariant, width: 0.5),
+        Positioned.fill(
+          child: InAppWebView(
+            key: _webViewKey,
+            initialUrlRequest: URLRequest(url: WebUri(_readerUrl!)),
+            initialSettings: InAppWebViewSettings(
+              javaScriptEnabled: true,
+              allowFileAccessFromFileURLs: true,
+              allowUniversalAccessFromFileURLs: true,
             ),
-          ),
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.list, size: 18),
-                onPressed: () => setState(() => _showToc = !_showToc),
-                tooltip: '目录',
-                iconSize: 18,
-                visualDensity: VisualDensity.compact,
-              ),
-              if (_chapters.isNotEmpty)
-                Expanded(
-                  child: Text(
-                    _selectedChapter < _chapters.length
-                        ? _chapters[_selectedChapter].label
-                        : '',
-                    style: const TextStyle(fontSize: 12),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                )
-              else
-                const Expanded(child: SizedBox()),
-              if (_totalPages > 0)
-                Text(
-                  '$_currentPage / $_totalPages${_locationsReady ? '' : ' (章节)'}',
-                  style: TextStyle(
-                      fontSize: 11, color: colorScheme.onSurfaceVariant),
-                ),
-            ],
+            onWebViewCreated: _onWebViewCreated,
+            onLoadStop: _onLoadStop,
           ),
         ),
-        Expanded(
-          child: Stack(
-            children: [
-              InAppWebView(
-                key: _webViewKey,
-                initialUrlRequest: URLRequest(url: WebUri(_readerUrl!)),
-                initialSettings: InAppWebViewSettings(
-                  javaScriptEnabled: true,
-                  allowFileAccessFromFileURLs: true,
-                  allowUniversalAccessFromFileURLs: true,
+        // Floating TOC button (top-left)
+        if (_chapters.isNotEmpty)
+          Positioned(
+            left: 12,
+            bottom: 24,
+            child: GestureDetector(
+              onTap: () => setState(() => _showToc = !_showToc),
+              child: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: colorScheme.surface,
+                  borderRadius: BorderRadius.circular(18),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                  border: Border.all(
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+                  ),
                 ),
-                onWebViewCreated: _onWebViewCreated,
-                onLoadStop: _onLoadStop,
+                child: Icon(Icons.list, size: 18, color: colorScheme.onSurfaceVariant),
               ),
-              if (_showToc && _chapters.isNotEmpty)
-                Positioned(
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  width: 260,
-                  child: Material(
-                    elevation: 4,
+            ),
+          ),
+        // Floating vertical page indicator (right)
+        if (_totalPages > 0)
+          Positioned(
+            right: 12,
+            bottom: 24,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+                border: Border.all(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GestureDetector(
+                    onTap: _prevPage,
+                    child: Icon(Icons.keyboard_arrow_up,
+                        size: 20, color: colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '$_currentPage',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
                     child: Container(
-                      color: colorScheme.surface,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      width: 20,
+                      height: 1,
+                      color: colorScheme.outlineVariant,
+                    ),
+                  ),
+                  Text(
+                    '$_totalPages',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  GestureDetector(
+                    onTap: _nextPage,
+                    child: Icon(Icons.keyboard_arrow_down,
+                        size: 20, color: colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        // TOC overlay panel
+        if (_showToc && _chapters.isNotEmpty)
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 260,
+            child: Material(
+              elevation: 4,
+              child: Container(
+                color: colorScheme.surface,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Row(
-                              children: [
-                                Text('目录',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 14,
-                                        color: colorScheme.onSurface)),
-                                const Spacer(),
-                                IconButton(
-                                  icon: const Icon(Icons.close, size: 18),
-                                  onPressed: () =>
-                                      setState(() => _showToc = false),
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const Divider(height: 1),
-                          Expanded(
-                            child: ListView.builder(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              itemCount: _chapters.length,
-                              itemBuilder: (context, index) {
-                                final ch = _chapters[index];
-                                final isSelected = index == _selectedChapter;
-                                return ListTile(
-                                  dense: true,
-                                  visualDensity: VisualDensity.compact,
-                                  selected: isSelected,
-                                  selectedTileColor: colorScheme
-                                      .primaryContainer
-                                      .withValues(alpha: 0.4),
-                                  title: Text(
-                                    ch.label,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: isSelected
-                                          ? FontWeight.w600
-                                          : FontWeight.normal,
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  onTap: () => _goToChapter(index),
-                                );
-                              },
-                            ),
+                          Text('目录',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                  color: colorScheme.onSurface)),
+                          const Spacer(),
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 18),
+                            onPressed: () =>
+                                setState(() => _showToc = false),
+                            visualDensity: VisualDensity.compact,
                           ),
                         ],
                       ),
                     ),
-                  ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        itemCount: _chapters.length,
+                        itemBuilder: (context, index) {
+                          final ch = _chapters[index];
+                          final isSelected = index == _selectedChapter;
+                          return ListTile(
+                            dense: true,
+                            visualDensity: VisualDensity.compact,
+                            selected: isSelected,
+                            selectedTileColor: colorScheme
+                                .primaryContainer
+                                .withValues(alpha: 0.4),
+                            title: Text(
+                              ch.label,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: isSelected
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: () => _goToChapter(index),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-            ],
-          ),
-        ),
-        // Bottom pagination bar
-        Container(
-          height: 40,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerLow,
-            border: Border(
-              top: BorderSide(color: colorScheme.outlineVariant, width: 0.5),
+              ),
             ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.chevron_left),
-                onPressed: _prevPage,
-                iconSize: 20,
-                tooltip: '上一页',
-              ),
-              const SizedBox(width: 16),
-              Text(
-                _totalPages > 0
-                    ? '$_currentPage / $_totalPages${_locationsReady ? '' : ' (章节)'}'
-                    : '加载分页中...',
-                style: const TextStyle(fontSize: 12),
-              ),
-              const SizedBox(width: 16),
-              IconButton(
-                icon: const Icon(Icons.chevron_right),
-                onPressed: _nextPage,
-                iconSize: 20,
-                tooltip: '下一页',
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }

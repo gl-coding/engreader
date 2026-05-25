@@ -95,15 +95,27 @@ class MacPDFPlatformViewFactory: NSObject, FlutterPlatformViewFactory {
 
 // MARK: - Native annotate popover
 
+class AutoGrowingTextView: NSTextView {
+    var onTextChange: (() -> Void)?
+
+    override func didChangeText() {
+        super.didChangeText()
+        onTextChange?()
+    }
+}
+
 class AnnotatePopoverViewController: NSViewController {
     var text: String = ""
     var onAnnotate: (() -> Void)?
     var onAsk: ((String) -> Void)?
     private var typeLabel: NSTextField?
     private var textLabel: NSTextField?
-    private var askField: NSTextField?
+    private var askTextView: AutoGrowingTextView?
     private var askContainer: NSView?
     private var mainContainer: NSView?
+    private var askHeightConstraint: NSLayoutConstraint?
+    private var isAskExpanded = false
+    private var submitBtn: NSButton?
 
     override func loadView() {
         let isWord = !text.contains(" ") || text.split(separator: " ").count <= 2
@@ -168,36 +180,101 @@ class AnnotatePopoverViewController: NSViewController {
             askBtn.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
 
-        // Ask input row (hidden by default)
+        // Ask input row (collapsed by default, height = 0)
         let askRow = NSView()
         askRow.translatesAutoresizingMaskIntoConstraints = false
-        askRow.isHidden = true
+        askRow.clipsToBounds = true
         self.askContainer = askRow
 
-        let inputField = NSTextField()
-        inputField.placeholderString = "输入你的问题..."
-        inputField.font = NSFont.systemFont(ofSize: 13)
-        inputField.translatesAutoresizingMaskIntoConstraints = false
-        inputField.target = self
-        inputField.action = #selector(askSubmitted)
-        self.askField = inputField
+        // Input container with rounded border (Cursor-like style)
+        let inputWrapper = NSView()
+        inputWrapper.translatesAutoresizingMaskIntoConstraints = false
+        inputWrapper.wantsLayer = true
+        inputWrapper.layer?.borderWidth = 1
+        inputWrapper.layer?.borderColor = NSColor.separatorColor.cgColor
+        inputWrapper.layer?.cornerRadius = 8
 
-        let submitBtn = NSButton(title: "发送", target: self, action: #selector(askSubmitted))
-        submitBtn.bezelStyle = .rounded
-        submitBtn.translatesAutoresizingMaskIntoConstraints = false
+        // Auto-growing text view (no scroll view, no scrollbar)
+        let textView = AutoGrowingTextView()
+        textView.font = NSFont.systemFont(ofSize: 13)
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainerInset = NSSize(width: 4, height: 6)
+        textView.drawsBackground = false
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        textView.onTextChange = { [weak self] in
+            self?.adjustInputHeight()
+        }
+        self.askTextView = textView
 
-        askRow.addSubview(inputField)
-        askRow.addSubview(submitBtn)
+        // Arrow-up submit button (perfect circle using a wrapper view)
+        let sendWrapper = NSView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+        sendWrapper.translatesAutoresizingMaskIntoConstraints = false
+        sendWrapper.wantsLayer = true
+        sendWrapper.layer?.cornerRadius = 10
+        sendWrapper.layer?.masksToBounds = true
+        sendWrapper.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+
+        let sendBtn = NSButton(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+        sendBtn.translatesAutoresizingMaskIntoConstraints = false
+        sendBtn.isBordered = false
+        sendBtn.bezelStyle = .inline
+        sendBtn.wantsLayer = true
+        sendBtn.layer?.backgroundColor = .clear
+        sendBtn.target = self
+        sendBtn.action = #selector(askSubmitted)
+        if #available(macOS 11.0, *) {
+            let arrowImage = NSImage(systemSymbolName: "arrow.up", accessibilityDescription: "发送")
+            let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+            sendBtn.image = arrowImage?.withSymbolConfiguration(config)
+        } else {
+            sendBtn.title = "↑"
+            sendBtn.font = NSFont.systemFont(ofSize: 10, weight: .bold)
+        }
+        sendBtn.contentTintColor = .white
+        sendBtn.imagePosition = .imageOnly
+        sendWrapper.addSubview(sendBtn)
 
         NSLayoutConstraint.activate([
-            askRow.heightAnchor.constraint(equalToConstant: 36),
+            sendBtn.centerXAnchor.constraint(equalTo: sendWrapper.centerXAnchor),
+            sendBtn.centerYAnchor.constraint(equalTo: sendWrapper.centerYAnchor),
+            sendBtn.widthAnchor.constraint(equalToConstant: 20),
+            sendBtn.heightAnchor.constraint(equalToConstant: 20),
+        ])
+        self.submitBtn = sendBtn
 
-            inputField.leadingAnchor.constraint(equalTo: askRow.leadingAnchor, constant: 12),
-            inputField.centerYAnchor.constraint(equalTo: askRow.centerYAnchor),
-            inputField.trailingAnchor.constraint(equalTo: submitBtn.leadingAnchor, constant: -8),
+        inputWrapper.addSubview(textView)
+        inputWrapper.addSubview(sendWrapper)
 
-            submitBtn.trailingAnchor.constraint(equalTo: askRow.trailingAnchor, constant: -12),
-            submitBtn.centerYAnchor.constraint(equalTo: askRow.centerYAnchor),
+        NSLayoutConstraint.activate([
+            textView.leadingAnchor.constraint(equalTo: inputWrapper.leadingAnchor, constant: 8),
+            textView.topAnchor.constraint(equalTo: inputWrapper.topAnchor, constant: 6),
+            textView.bottomAnchor.constraint(equalTo: inputWrapper.bottomAnchor, constant: -6),
+            textView.trailingAnchor.constraint(equalTo: sendWrapper.leadingAnchor, constant: -8),
+
+            sendWrapper.trailingAnchor.constraint(equalTo: inputWrapper.trailingAnchor, constant: -8),
+            sendWrapper.bottomAnchor.constraint(equalTo: inputWrapper.bottomAnchor, constant: -8),
+            sendWrapper.widthAnchor.constraint(equalToConstant: 20),
+            sendWrapper.heightAnchor.constraint(equalToConstant: 20),
+        ])
+
+        askRow.addSubview(inputWrapper)
+
+        let heightConstraint = askRow.heightAnchor.constraint(equalToConstant: 0)
+        self.askHeightConstraint = heightConstraint
+
+        NSLayoutConstraint.activate([
+            heightConstraint,
+
+            inputWrapper.leadingAnchor.constraint(equalTo: askRow.leadingAnchor, constant: 12),
+            inputWrapper.topAnchor.constraint(equalTo: askRow.topAnchor, constant: 4),
+            inputWrapper.bottomAnchor.constraint(equalTo: askRow.bottomAnchor, constant: -8),
+            inputWrapper.trailingAnchor.constraint(equalTo: askRow.trailingAnchor, constant: -12),
         ])
 
         outerContainer.addSubview(container)
@@ -220,6 +297,22 @@ class AnnotatePopoverViewController: NSViewController {
         self.view = outerContainer
     }
 
+    private func adjustInputHeight() {
+        guard let textView = askTextView, isAskExpanded else { return }
+        textView.layoutManager?.ensureLayout(for: textView.textContainer!)
+        let usedRect = textView.layoutManager?.usedRect(for: textView.textContainer!) ?? .zero
+        let textHeight = usedRect.height + textView.textContainerInset.height * 2
+        let minHeight: CGFloat = 48
+        let maxHeight: CGFloat = 160
+        let newHeight = min(max(textHeight + 24, minHeight), maxHeight)
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.1
+            context.allowsImplicitAnimation = true
+            self.askHeightConstraint?.constant = newHeight
+            self.view.layoutSubtreeIfNeeded()
+        })
+    }
+
     func updateText(_ newText: String) {
         text = newText
         let isWord = !newText.contains(" ") || newText.split(separator: " ").count <= 2
@@ -230,9 +323,33 @@ class AnnotatePopoverViewController: NSViewController {
         typeLabel?.stringValue = typeText
         typeLabel?.textColor = isWord ? NSColor.systemBlue : NSColor.systemPurple
         textLabel?.stringValue = preview
-        // Hide ask row when text changes
-        askContainer?.isHidden = true
-        askField?.stringValue = ""
+        // Collapse ask row when text changes
+        if isAskExpanded {
+            collapseAskRow()
+        }
+        askTextView?.string = ""
+    }
+
+    private func collapseAskRow() {
+        isAskExpanded = false
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+            self.askHeightConstraint?.constant = 0
+            self.view.layoutSubtreeIfNeeded()
+        })
+    }
+
+    private func expandAskRow() {
+        isAskExpanded = true
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+            self.askHeightConstraint?.constant = 48
+            self.view.layoutSubtreeIfNeeded()
+        }) {
+            self.view.window?.makeFirstResponder(self.askTextView)
+        }
     }
 
     @objc private func annotateClicked() {
@@ -240,12 +357,15 @@ class AnnotatePopoverViewController: NSViewController {
     }
 
     @objc private func askClicked() {
-        askContainer?.isHidden = false
-        askField?.becomeFirstResponder()
+        if isAskExpanded {
+            collapseAskRow()
+        } else {
+            expandAskRow()
+        }
     }
 
     @objc private func askSubmitted() {
-        let question = askField?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let question = askTextView?.string.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !question.isEmpty {
             onAsk?(question)
         }
