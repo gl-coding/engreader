@@ -156,7 +156,7 @@ class _WebReaderViewState extends State<WebReaderView> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerLow,
+              color: Colors.white,
               border: Border(
                 bottom: BorderSide(
                     color: colorScheme.outlineVariant, width: 0.5),

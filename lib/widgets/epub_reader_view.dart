@@ -357,11 +357,11 @@ class _EpubReaderViewState extends State<EpubReaderView> {
             child: GestureDetector(
               onTap: () => setState(() => _showToc = !_showToc),
               child: Container(
-                width: 36,
-                height: 36,
+                width: 28,
+                height: 28,
                 decoration: BoxDecoration(
-                  color: colorScheme.surface,
-                  borderRadius: BorderRadius.circular(18),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.08),
@@ -373,7 +373,7 @@ class _EpubReaderViewState extends State<EpubReaderView> {
                     color: colorScheme.outlineVariant.withValues(alpha: 0.3),
                   ),
                 ),
-                child: Icon(Icons.list, size: 18, color: colorScheme.onSurfaceVariant),
+                child: Icon(Icons.list, size: 16, color: colorScheme.onSurfaceVariant),
               ),
             ),
           ),
@@ -383,10 +383,10 @@ class _EpubReaderViewState extends State<EpubReaderView> {
             right: 12,
             bottom: 24,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               decoration: BoxDecoration(
-                color: colorScheme.surface,
-                borderRadius: BorderRadius.circular(20),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.08),
@@ -404,37 +404,35 @@ class _EpubReaderViewState extends State<EpubReaderView> {
                   GestureDetector(
                     onTap: _prevPage,
                     child: Icon(Icons.keyboard_arrow_up,
-                        size: 20, color: colorScheme.onSurfaceVariant),
+                        size: 16, color: colorScheme.onSurfaceVariant),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     '$_currentPage',
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 11,
                       fontWeight: FontWeight.w600,
                       color: colorScheme.onSurface,
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Container(
-                      width: 20,
-                      height: 1,
-                      color: colorScheme.outlineVariant,
-                    ),
+                  Container(
+                    width: 16,
+                    height: 1,
+                    margin: const EdgeInsets.symmetric(vertical: 2),
+                    color: colorScheme.outlineVariant,
                   ),
                   Text(
                     '$_totalPages',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 10,
                       color: colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   GestureDetector(
                     onTap: _nextPage,
                     child: Icon(Icons.keyboard_arrow_down,
-                        size: 20, color: colorScheme.onSurfaceVariant),
+                        size: 16, color: colorScheme.onSurfaceVariant),
                   ),
                 ],
               ),

@@ -154,10 +154,10 @@ class _PdfReaderViewState extends State<PdfReaderView> {
             right: 12,
             bottom: 24,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               decoration: BoxDecoration(
-                color: colorScheme.surface,
-                borderRadius: BorderRadius.circular(20),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(alpha: 0.08),
@@ -175,40 +175,38 @@ class _PdfReaderViewState extends State<PdfReaderView> {
                   GestureDetector(
                     onTap: _currentPage > 0 ? _previousPage : null,
                     child: Icon(Icons.keyboard_arrow_up,
-                        size: 20,
+                        size: 16,
                         color: _currentPage > 0
                             ? colorScheme.onSurfaceVariant
                             : colorScheme.outlineVariant),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     '${_currentPage + 1}',
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 11,
                       fontWeight: FontWeight.w600,
                       color: colorScheme.onSurface,
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Container(
-                      width: 20,
-                      height: 1,
-                      color: colorScheme.outlineVariant,
-                    ),
+                  Container(
+                    width: 16,
+                    height: 1,
+                    margin: const EdgeInsets.symmetric(vertical: 2),
+                    color: colorScheme.outlineVariant,
                   ),
                   Text(
                     '$_pageCount',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 10,
                       color: colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   GestureDetector(
                     onTap: _currentPage < _pageCount - 1 ? _nextPage : null,
                     child: Icon(Icons.keyboard_arrow_down,
-                        size: 20,
+                        size: 16,
                         color: _currentPage < _pageCount - 1
                             ? colorScheme.onSurfaceVariant
                             : colorScheme.outlineVariant),

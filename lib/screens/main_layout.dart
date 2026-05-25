@@ -33,7 +33,7 @@ class _MainLayoutState extends State<MainLayout> {
   List<Annotation> _annotations = [];
   LlmConfig _llmConfig = LlmConfig.defaultConfig;
   bool _showSidebar = true;
-  bool _showAnnotationPanel = true;
+  bool _showAnnotationPanel = false;
   int _currentPage = 0;
 
   static IconData _fileIcon(String type) {
@@ -284,16 +284,16 @@ class _MainLayoutState extends State<MainLayout> {
           _buildMainContent(colorScheme, pageAnnotations),
           // Floating - left: sidebar toggle (fixed in window)
           Positioned(
-            top: 38,
+            top: 12,
             left: (_showSidebar ? 420 : 0) + 8.0,
             child: _buildFloatingPill(
               colorScheme,
               child: InkWell(
                 onTap: () => setState(() => _showSidebar = !_showSidebar),
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(8),
                 child: SizedBox(
-                  width: 36,
-                  height: 36,
+                  width: 28,
+                  height: 28,
                   child: Icon(
                     _showSidebar ? Icons.menu_open : Icons.menu,
                     size: 18,
@@ -306,7 +306,7 @@ class _MainLayoutState extends State<MainLayout> {
           // Floating - right: actions (fixed in window, never moves)
           if (_currentFilePath != null)
             Positioned(
-              top: 38,
+              top: 12,
               right: 8,
               child: _buildFloatingActions(colorScheme),
             ),
@@ -345,7 +345,7 @@ class _MainLayoutState extends State<MainLayout> {
                   Container(
                     width: 300,
                     decoration: BoxDecoration(
-                      color: colorScheme.surface,
+                      color: const Color(0xFFF2F2F7),
                       border: Border(
                         left: BorderSide(
                           color: colorScheme.outlineVariant.withValues(alpha: 0.5),
@@ -369,8 +369,8 @@ class _MainLayoutState extends State<MainLayout> {
   Widget _buildFloatingPill(ColorScheme colorScheme, {required Widget child}) {
     return Container(
       decoration: BoxDecoration(
-        color: colorScheme.surface.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(22),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.08),
@@ -379,7 +379,7 @@ class _MainLayoutState extends State<MainLayout> {
           ),
         ],
         border: Border.all(
-          color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+          color: colorScheme.outlineVariant.withValues(alpha: 0.3),
         ),
       ),
       child: child,
@@ -390,9 +390,9 @@ class _MainLayoutState extends State<MainLayout> {
     return _buildFloatingPill(
       colorScheme,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -403,7 +403,7 @@ class _MainLayoutState extends State<MainLayout> {
               ),
               Container(
                 width: 1,
-                height: 20,
+                height: 16,
                 color: colorScheme.outlineVariant.withValues(alpha: 0.5),
               ),
               _FloatingActionBtn(
@@ -528,15 +528,15 @@ class _FloatingActionBtn extends StatelessWidget {
       message: tooltip,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(8),
         child: Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
+          width: 28,
+          height: 28,
+          decoration: const BoxDecoration(
             shape: BoxShape.circle,
             color: Colors.transparent,
           ),
-          child: Icon(icon, size: 20, color: colorScheme.onSurfaceVariant),
+          child: Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
         ),
       ),
     );

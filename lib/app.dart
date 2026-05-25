@@ -11,18 +11,30 @@ class EngReaderApp extends StatelessWidget {
       title: 'EngReader',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2E7D6F),
-          brightness: Brightness.light,
+        colorScheme: const ColorScheme.light(
+          primary: Color(0xFF3478F6),
+          onPrimary: Colors.white,
+          surface: Colors.white,
+          onSurface: Color(0xFF1C1C1E),
+          surfaceContainerLow: Color(0xFFF2F2F7),
+          outline: Color(0xFFD1D1D6),
+          outlineVariant: Color(0xFFE5E5EA),
         ),
         useMaterial3: true,
+        scaffoldBackgroundColor: Colors.white,
       ),
       darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2E7D6F),
-          brightness: Brightness.dark,
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF5A9CFF),
+          onPrimary: Colors.white,
+          surface: Color(0xFF1C1C1E),
+          onSurface: Color(0xFFF2F2F7),
+          surfaceContainerLow: Color(0xFF2C2C2E),
+          outline: Color(0xFF48484A),
+          outlineVariant: Color(0xFF3A3A3C),
         ),
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFF1C1C1E),
       ),
       themeMode: ThemeMode.system,
       initialRoute: '/',

@@ -624,7 +624,7 @@ class _SidebarState extends State<Sidebar> {
                         ],
                         child: Material(
                           color: const Color(0xFF3478F6),
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(8),
                           child: const Padding(
                             padding: EdgeInsets.symmetric(
                                 horizontal: 12, vertical: 6),

@@ -37,7 +37,7 @@ class _AnnotationPanelState extends State<AnnotationPanel> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
-      color: colorScheme.surfaceContainerLow,
+      color: const Color(0xFFF2F2F7),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -190,10 +190,11 @@ class _AnnotationCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: 0,
+      color: Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
         side: BorderSide(
-            color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+            color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
       ),
       child: InkWell(
         onTap: onTap,
